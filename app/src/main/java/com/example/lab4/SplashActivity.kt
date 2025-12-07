@@ -75,15 +75,43 @@ class SplashActivity : AppCompatActivity() {
     }
 
     private fun checkAuthAndNavigate() {
-         tokenManager = TokenManager(this)
-         val refreshToken = tokenManager.getRefreshToken()
-         if (!refreshToken.isNullOrEmpty()) {
-             Log.d(TAG, "Found refresh token, navigating to Home (Optimistic Auth)")
-             navigateToHome()
-         } else {
-             Log.d(TAG, "No refresh token found, navigating to Login")
-             navigateToLogin()
-         }
+          tokenManager = TokenManager(this)
+          val refreshToken = tokenManager.getRefreshToken()
+
+          if (!refreshToken.isNullOrEmpty()) {
+              Log.d(TAG, "Found refresh token, validating with backend...")
+              binding.loadingStatusTextView.text = "Validating session..."
+
+              val request = com.example.lab4.data.model.RefreshTokenRequest(refreshToken)
+              RetrofitClient.authService.refreshToken(request).enqueue(object : retrofit2.Callback<com.example.lab4.data.model.AuthResponseDto> {
+                  override fun onResponse(
+                      call: retrofit2.Call<com.example.lab4.data.model.AuthResponseDto>,
+                      response: retrofit2.Response<com.example.lab4.data.model.AuthResponseDto>
+                  ) {
+                      if (response.isSuccessful && response.body() != null) {
+                          Log.d(TAG, "Token refresh successful, navigating to Home")
+                          val authResponse = response.body()!!
+                          tokenManager.saveAccessToken(authResponse.tokens.accessToken)
+                          tokenManager.saveRefreshToken(authResponse.tokens.refreshToken)
+                          navigateToHome()
+                      } else {
+                          Log.w(TAG, "Token refresh failed (code ${response.code()}), navigating to Login")
+                          tokenManager.clearTokens() // Clear invalid tokens
+                          navigateToLogin()
+                      }
+                  }
+
+                  override fun onFailure(call: retrofit2.Call<com.example.lab4.data.model.AuthResponseDto>, t: Throwable) {
+                      Log.e(TAG, "Token refresh network error: ${t.message}", t)
+                      // Decide: if network error, maybe go to login or show retry? 
+                      // For now, safe default is Login so user isn't stuck.
+                      navigateToLogin()
+                  }
+              })
+          } else {
+              Log.d(TAG, "No refresh token found, navigating to Login")
+              navigateToLogin()
+          }
     }
 
     private fun navigateToHome() {

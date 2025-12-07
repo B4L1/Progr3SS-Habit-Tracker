@@ -7,7 +7,7 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
-    internal const val BASE_URL = "http://10.0.2.2:3000/"
+    internal const val BASE_URL = "http://10.137.157.147:8080/"
     // Placeholder for the Gemini API base URL
     private const val GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/"
 

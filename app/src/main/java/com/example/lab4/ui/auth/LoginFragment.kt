@@ -139,6 +139,10 @@ class LoginFragment : Fragment() {
                 })
         }
 
+        binding.googleSignInButton.setOnClickListener {
+             Toast.makeText(context, "Google Sign-In coming soon!", Toast.LENGTH_SHORT).show()
+        }
+
         binding.registerTab.setOnClickListener {
             val extras = FragmentNavigatorExtras(
                 binding.tabSelector to "tab_selector"
