@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Lab4</string>
+    <!-- TODO: Remove or change this placeholder text -->
+    <string name="hello_login_fragment">Hello login fragment</string>
+    <string name="hello_register_fragment">Hello register fragment</string>
+    <string name="hello_profile_fragment">Hello profile fragment</string>
+    <string name="hello_home_fragment">Hello home fragment</string>
+    <string name="hello_blank_fragment">Hello blank fragment</string>
+
+    <string name="user_info_format">Username: %1$s\nEmail: %2$s\n%3$s</string>
+
+    <string-array name="repeat_options">
+        <item>None</item>
+        <item>Daily</item>
+        <item>Weekdays</item>
+        <item>Weekends</item>
+    </string-array>
+
+    <string-array name="status_options">
+        <item>Planned</item>
+        <item>Completed</item>
+        <item>Skipped</item>
+    </string-array>
+</resources>
