@@ -18,6 +18,10 @@ import com.example.lab4.databinding.FragmentHomeBinding
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.lifecycle.lifecycleScope
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,6 +31,7 @@ class HomeFragment : Fragment() {
     private val binding get() = _binding!!
     private lateinit var scheduleAdapter: ScheduleAdapter
     private val TAG = "HomeFragment"
+    private lateinit var iconManager: com.example.lab4.data.local.IconManager
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -38,6 +43,7 @@ class HomeFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        iconManager = com.example.lab4.data.local.IconManager(requireContext())
 
         // Set Header Date
         val sdf = SimpleDateFormat("EEEE, MMM dd", Locale.getDefault())
@@ -62,7 +68,7 @@ class HomeFragment : Fragment() {
     }
 
     private fun setupRecyclerView() {
-        scheduleAdapter = ScheduleAdapter(emptyList()) { schedule ->
+        scheduleAdapter = ScheduleAdapter(emptyList(), iconManager) { schedule ->
             val bundle = bundleOf("schedule_id" to schedule.id)
             findNavController().navigate(R.id.action_homeFragment_to_scheduleDetailsFragment, bundle)
         }
@@ -81,6 +87,16 @@ class HomeFragment : Fragment() {
                     val schedules = response.body()!!
                     Log.d(TAG, "Fetched ${schedules.size} schedules")
                     scheduleAdapter.updateData(schedules)
+                    
+                    // Background check for missing icons
+                    lifecycleScope.launch {
+                        val habits = schedules.mapNotNull { it.habit }.distinctBy { it.id }
+                        iconManager.checkAndFetchIcons(habits)
+                        // Refresh to show any newly fetched icons
+                        withContext(Dispatchers.Main) {
+                            scheduleAdapter.notifyDataSetChanged()
+                        }
+                    }
                 } else {
                     Log.e(TAG, "Failed to fetch schedules: ${response.code()}")
                 }

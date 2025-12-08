@@ -15,9 +15,8 @@ object RetrofitClient {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
-    private val okHttpClient = OkHttpClient.Builder()
-        .addInterceptor(loggingInterceptor)
-        .build()
+    private var okHttpClient: OkHttpClient? = null
+    private var retrofitInstance: Retrofit? = null
 
     // Separate OkHttp client for Gemini so we can inject the API key header.
     private val geminiOkHttpClient: OkHttpClient by lazy {
@@ -36,21 +35,40 @@ object RetrofitClient {
                     ""
                 }
                 if (key.isNotBlank()) {
+                    android.util.Log.d("RetrofitClient", "Gemini Key found: ${key.take(4)}***")
                     // Use Authorization: Bearer <KEY> when available
-                    builder.addHeader("Authorization", "Bearer $key")
+                    builder.addHeader("x-goog-api-key", key)
+                } else {
+                    android.util.Log.e("RetrofitClient", "Gemini Key NOT found or empty!")
                 }
                 chain.proceed(builder.build())
             }
             .build()
     }
 
-    val instance: Retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
-            .client(okHttpClient)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
+    // Must call init(context) before using instance
+    fun init(context: Context) {
+        if (okHttpClient == null) {
+            okHttpClient = OkHttpClient.Builder()
+                .addInterceptor(AuthInterceptor(context)) // Add Auth Interceptor
+                .addInterceptor(loggingInterceptor)
+                .build()
+
+            retrofitInstance = Retrofit.Builder()
+                .baseUrl(BASE_URL)
+                .client(okHttpClient!!)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+        }
     }
+
+    val instance: Retrofit
+        get() {
+            if (retrofitInstance == null) {
+                throw IllegalStateException("RetrofitClient must be initialized with context before use")
+            }
+            return retrofitInstance!!
+        }
 
     private val geminiInstance: Retrofit by lazy {
         Retrofit.Builder()
@@ -60,10 +78,7 @@ object RetrofitClient {
             .build()
     }
 
-    // No-op initializer to mirror usage in Activities. Keeps backward compatibility.
-    fun init(context: Context) {
-        // Currently no initialization required; method present so callers can safely call it early.
-    }
+
 
     fun <T> createService(serviceClass: Class<T>): T {
         return instance.create(serviceClass)

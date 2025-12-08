@@ -181,8 +181,43 @@ class EditScheduleFragment : Fragment() {
 
         override fun onBindViewHolder(holder: HistoryViewHolder, position: Int) {
             val item = history[position]
+            val isCompleted = item.is_completed ?: false
+            val loggedTime = item.logged_time ?: 0
+            
+            val context = holder.itemView.context
+            
+            when {
+                isCompleted -> {
+                    holder.binding.statusIcon.setImageResource(com.example.lab4.R.drawable.ic_check)
+                    holder.binding.statusIcon.background = context.getDrawable(com.example.lab4.R.drawable.bg_circle_green)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(com.example.lab4.R.color.white))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Completed"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(com.example.lab4.R.color.green_completed))
+                }
+                loggedTime > 0 -> {
+                    holder.binding.statusIcon.setImageResource(com.example.lab4.R.drawable.ic_status_pending)
+                    holder.binding.statusIcon.background = context.getDrawable(com.example.lab4.R.drawable.bg_icon_circle)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(com.example.lab4.R.color.purple_200))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Added progress"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(com.example.lab4.R.color.purple_200))
+                }
+                else -> {
+                    holder.binding.statusIcon.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                    holder.binding.statusIcon.background = context.getDrawable(com.example.lab4.R.drawable.bg_circle_red)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(com.example.lab4.R.color.white))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Missed"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(android.R.color.holo_red_light))
+                }
+            }
+            
             holder.binding.historyDateTextView.text = item.date
-            holder.binding.historyTimeTextView.text = "${item.logged_time ?: 0} mins"
+            holder.binding.historyTimeTextView.text = "${loggedTime}m"
         }
 
         override fun getItemCount() = history.size

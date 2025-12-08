@@ -4,6 +4,9 @@
         android:id="@+id/action_edit"
         android:title="Edit Schedule" />
     <item
+        android:id="@+id/action_skip"
+        android:title="Skip Schedule" />
+    <item
         android:id="@+id/action_delete"
         android:title="Delete Schedule" />
 </menu>

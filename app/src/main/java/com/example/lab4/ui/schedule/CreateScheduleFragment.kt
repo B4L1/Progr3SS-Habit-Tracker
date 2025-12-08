@@ -11,7 +11,6 @@ import android.widget.Button
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import com.example.lab4.R
 import com.example.lab4.data.model.*
@@ -19,7 +18,6 @@ import com.example.lab4.data.remote.HabitService
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.data.remote.ScheduleService
 import com.example.lab4.databinding.FragmentCreateScheduleBinding
-import kotlinx.coroutines.launch
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -159,6 +157,21 @@ class CreateScheduleFragment : Fragment() {
         
         binding.habitAutoComplete.setOnItemClickListener { _, _, position, _ ->
             selectedHabit = habits[position]
+            // Pre-fill goal if available
+            selectedHabit?.goal?.let { goalStr ->
+                // Expected format: "30 Minutes" or "10 Times"
+                val parts = goalStr.split(" ")
+                if (parts.size >= 2) {
+                    binding.amountEditText.setText(parts[0])
+                    val unit = parts.drop(1).joinToString(" ").replaceFirstChar { it.uppercase() } 
+                    // Set spinner if unit matches
+                    val adapter = binding.unitSpinner.adapter as ArrayAdapter<String>
+                    val currentPos = adapter.getPosition(unit)
+                    if (currentPos >= 0) {
+                        binding.unitSpinner.setText(unit, false)
+                    }
+                }
+            }
         }
     }
 
@@ -168,102 +181,84 @@ class CreateScheduleFragment : Fragment() {
             return
         }
 
-        lifecycleScope.launch {
-            val iconName = getIconForHabit(selectedHabit!!.name, selectedHabit!!.description ?: "")
-            
-            val amountStr = binding.amountEditText.text.toString()
-            val amount = amountStr.toIntOrNull() ?: 30
-            val unit = binding.unitSpinner.text.toString()
-            
-            durationMinutes = if (unit == "Hours") amount * 60 else amount
-            
-            val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
-            isoFormat.timeZone = TimeZone.getTimeZone("UTC")
-            val startTimeIso = isoFormat.format(calendar.time)
-            
-            val scheduleService = RetrofitClient.createService(ScheduleService::class.java)
+        val amountStr = binding.amountEditText.text.toString()
+        val amount = amountStr.toIntOrNull() ?: 30
+        val unit = binding.unitSpinner.text.toString()
+        
+        durationMinutes = if (unit == "Hours") amount * 60 else amount
+        
+        // Use ISO 8601 for start_time
+        val isoFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.getDefault())
+        isoFormat.timeZone = TimeZone.getTimeZone("UTC")
+        val startTimeIso = isoFormat.format(calendar.time)
+        
+        // Use YYYY-MM-DD for date
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateString = dateFormat.format(calendar.time)
+        
+        val scheduleService = RetrofitClient.createService(ScheduleService::class.java)
 
-            if (selectedRepeatMode == "custom" || selectedRepeatMode == "none") {
-                val request = CreateCustomScheduleDto(
-                    habitId = selectedHabit!!.id,
-                    date = startTimeIso,
-                    start_time = startTimeIso,
-                    duration_minutes = durationMinutes,
-                    notes = "",
-                    is_custom = true,
-                    icon = iconName
-                )
-                
-                scheduleService.createCustomSchedule(request).enqueue(object : Callback<ScheduleResponseDto> {
-                    override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
-                        if (response.isSuccessful) {
-                            Toast.makeText(context, "Schedule created", Toast.LENGTH_SHORT).show()
-                            findNavController().navigateUp()
-                        } else {
-                            Toast.makeText(context, "Failed: ${response.code()}", Toast.LENGTH_SHORT).show()
-                        }
+        if (selectedRepeatMode == "custom" || selectedRepeatMode == "none") {
+            val request = CreateCustomScheduleDto(
+                habitId = selectedHabit!!.id,
+                date = dateString,
+                start_time = startTimeIso,
+                duration_minutes = durationMinutes,
+                notes = null
+            )
+            
+            scheduleService.createCustomSchedule(request).enqueue(object : Callback<ScheduleResponseDto> {
+                override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
+                    if (response.isSuccessful) {
+                        Toast.makeText(context, "Schedule created", Toast.LENGTH_SHORT).show()
+                        findNavController().navigateUp()
+                    } else {
+                        val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                        Log.e("CreateSchedule", "Error: $errorBody")
+                        Toast.makeText(context, "Failed: ${response.code()} - $errorBody", Toast.LENGTH_LONG).show()
                     }
-                    override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                        Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                    }
-                })
-            } else {
-                val request = CreateRecurringScheduleDto(
-                    habitId = selectedHabit!!.id,
-                    start_time = startTimeIso,
-                    repeatPattern = selectedRepeatMode,
-                    duration_minutes = durationMinutes,
-                    notes = "",
-                    is_custom = true,
-                    icon = iconName
-                )
-
-                scheduleService.createRecurringSchedule(request).enqueue(object : Callback<List<ScheduleResponseDto>> {
-                    override fun onResponse(call: Call<List<ScheduleResponseDto>>, response: Response<List<ScheduleResponseDto>>) {
-                        if (response.isSuccessful) {
-                            Toast.makeText(context, "Recurring schedules created", Toast.LENGTH_SHORT).show()
-                            findNavController().navigateUp()
-                        } else {
-                            Toast.makeText(context, "Failed: ${response.code()}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-
-                    override fun onFailure(call: Call<List<ScheduleResponseDto>>, t: Throwable) {
-                        Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                    }
-                })
+                }
+                override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
+                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+                }
+            })
+        } else {
+            // Map repeat mode to daysOfWeek
+            // 1=Monday, 7=Sunday. (Java Calendar: 2=Monday, 1=Sunday)
+            // Spec says 1=Monday...7=Sunday.
+            val daysOfWeek = when (selectedRepeatMode) {
+                "daily" -> listOf(1, 2, 3, 4, 5, 6, 7)
+                "weekdays" -> listOf(1, 2, 3, 4, 5)
+                "weekends" -> listOf(6, 7)
+                else -> listOf(1, 2, 3, 4, 5, 6, 7) // Default or custom logic
             }
+
+            val request = CreateRecurringScheduleDto(
+                habitId = selectedHabit!!.id,
+                start_time = startTimeIso,
+                daysOfWeek = daysOfWeek,
+                numberOfWeeks = 4,
+                duration_minutes = durationMinutes,
+                notes = null
+            )
+
+            scheduleService.createRecurringSchedule(request).enqueue(object : Callback<List<ScheduleResponseDto>> {
+                override fun onResponse(call: Call<List<ScheduleResponseDto>>, response: Response<List<ScheduleResponseDto>>) {
+                    if (response.isSuccessful) {
+                        Toast.makeText(context, "Recurring schedules created", Toast.LENGTH_SHORT).show()
+                        findNavController().navigateUp()
+                    } else {
+                        val errorBody = response.errorBody()?.string() ?: "Unknown error"
+                        Log.e("CreateSchedule", "Error: $errorBody")
+                        Toast.makeText(context, "Failed: ${response.code()} - $errorBody", Toast.LENGTH_LONG).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<List<ScheduleResponseDto>>, t: Throwable) {
+                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+                }
+            })
         }
-    }
-
-    private suspend fun getIconForHabit(name: String, description: String): String {
-        val geminiService = RetrofitClient.createGeminiService()
-
-        // Get the list of available icons from the drawable directory
-        val iconList = getDrawableIconList()
-        val prompt = "Based on the following activity name and description, which of these icons would be the best fit? Please return only the name of the icon, with no other text. \n\nActivity Name: $name\nDescription: $description\n\nIcons: ${iconList.joinToString(", ") }"
-
-        val request = GeminiRequest(listOf(Content(listOf(Part(prompt)))))
-
-        return try {
-            val response = geminiService.getIconSuggestion(request)
-            val iconName = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim() ?: "ic_activity_placeholder"
-            
-            // Check if the returned icon name is valid
-            if (iconList.contains(iconName)) {
-                iconName
-            } else {
-                "ic_activity_placeholder"
-            }
-        } catch (e: Exception) {
-            Log.e("CreateScheduleFragment", "Error getting icon from Gemini: ${e.message}")
-            "ic_activity_placeholder"
-        }
-    }
-
-    private fun getDrawableIconList(): List<String> {
-        // This is a simplified approach. In a real app, you might parse the R class or use a different method.
-        return (1..50).map { "ic_activity_$it" } 
     }
 
     override fun onDestroyView() {

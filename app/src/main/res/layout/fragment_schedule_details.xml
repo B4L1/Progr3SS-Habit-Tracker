@@ -99,6 +99,20 @@
                     app:layout_constraintBottom_toBottomOf="@id/statusProgressIndicator" />
                 
                 <TextView
+                    android:id="@+id/progressText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0 / 30 mins"
+                    android:textSize="12sp"
+                    android:textColor="@color/purple_200"
+                    android:textStyle="bold"
+                    app:layout_constraintTop_toBottomOf="@id/statusProgressIndicator"
+                    app:layout_constraintEnd_toEndOf="@id/statusProgressIndicator"
+                    app:layout_constraintStart_toStartOf="parent"
+                    app:layout_constraintHorizontal_bias="1.0"
+                    android:layout_marginTop="4dp"/>
+
+                <TextView
                     android:id="@+id/statusLabelSmall"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -106,10 +120,17 @@
                     android:textSize="10sp"
                     android:textColor="@android:color/darker_gray"
                     android:layout_marginTop="4dp"
-                    app:layout_constraintTop_toBottomOf="@id/statusProgressIndicator"
+                    app:layout_constraintTop_toBottomOf="@id/progressText"
                     app:layout_constraintEnd_toEndOf="@id/statusProgressIndicator"
                     android:gravity="end"/>
 
+
+                <androidx.constraintlayout.widget.Barrier
+                    android:id="@+id/headerBarrier"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    app:barrierDirection="bottom"
+                    app:constraint_referenced_ids="timeRangeTextView,statusLabelSmall" />
 
                 <!-- Details Grid -->
                 <TextView
@@ -119,7 +140,7 @@
                     android:text="Duration"
                     android:textColor="@android:color/darker_gray"
                     android:layout_marginTop="24dp"
-                    app:layout_constraintTop_toBottomOf="@id/habitIcon"
+                    app:layout_constraintTop_toBottomOf="@id/headerBarrier"
                     app:layout_constraintStart_toStartOf="parent"/>
 
                 <TextView

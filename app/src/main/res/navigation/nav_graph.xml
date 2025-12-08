@@ -106,4 +106,9 @@
         android:name="com.example.lab4.ui.schedule.EditScheduleFragment"
         android:label="fragment_edit_schedule"
         tools:layout="@layout/fragment_edit_schedule" />
+    <fragment
+        android:id="@+id/AIAssistantFragment"
+        android:name="com.example.lab4.ui.ai.AIAssistantFragment"
+        android:label="fragment_ai_assistant"
+        tools:layout="@layout/fragment_ai_assistant" />
 </navigation>

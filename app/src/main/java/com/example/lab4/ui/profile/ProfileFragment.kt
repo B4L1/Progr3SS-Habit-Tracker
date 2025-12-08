@@ -83,7 +83,9 @@ class ProfileFragment : Fragment() {
                 override fun onFailure(call: Call<Void>, t: Throwable) {}
             })
         }
+
         tokenManager.clearTokens()
+        com.example.lab4.data.local.IconManager(requireContext()).clear()
         findNavController().navigate(R.id.action_profileFragment_to_loginFragment)
     }
 
@@ -109,7 +111,10 @@ class ProfileFragment : Fragment() {
 
                         // Fix for localhost URLs if running on Android Emulator/Device
                         if (imageUrl.contains("localhost")) {
-                            imageUrl = imageUrl.replace("localhost", "10.52.64.147") 
+                            val currentBaseUrl = RetrofitClient.BASE_URL
+                            // Extract just the host (IP and port)
+                            val host = currentBaseUrl.removePrefix("http://").removePrefix("https://").substringBefore("/")
+                            imageUrl = imageUrl.replace("localhost:3000", host).replace("localhost", host.substringBefore(":")) 
                         }
 
                         // Handle URL construction

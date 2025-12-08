@@ -1,24 +1,22 @@
 package com.example.lab4.data.model
 
+import com.google.gson.annotations.SerializedName
+
 data class CreateCustomScheduleDto(
-    val habitId: Int,
-    val date: String, // ISO 8601 date-time string
-    val start_time: String, // ISO 8601 date-time string
-    val duration_minutes: Int?,
-    val notes: String?,
-    val is_custom: Boolean = true,
-    val icon: String? = null
+    val habitId: Int, // backend expects camelCase 'habitId'
+    val date: String,
+    @SerializedName("start_time") val start_time: String,
+    @SerializedName("duration_minutes") val duration_minutes: Int,
+    val notes: String?
 )
 
 data class CreateRecurringScheduleDto(
-    val habitId: Int,
-    val start_time: String, // ISO 8601 date-time string
-    val repeatPattern: String, // "daily", "weekdays", "weekends"
-    val duration_minutes: Int?,
-    val notes: String?,
-    val is_custom: Boolean = true,
-    val repeatDays: Int = 30,
-    val icon: String? = null
+    val habitId: Int, // backend expects camelCase 'habitId'
+    @SerializedName("start_time") val start_time: String,
+    val daysOfWeek: List<Int>, // backend expects camelCase 'daysOfWeek'
+    val numberOfWeeks: Int = 4, // backend expects camelCase 'numberOfWeeks'
+    @SerializedName("duration_minutes") val duration_minutes: Int,
+    val notes: String?
 )
 
 data class UpdateScheduleDto(

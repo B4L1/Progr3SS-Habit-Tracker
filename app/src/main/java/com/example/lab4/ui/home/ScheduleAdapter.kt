@@ -7,12 +7,14 @@ import com.example.lab4.R
 import com.example.lab4.data.model.ScheduleResponseDto
 import com.example.lab4.databinding.ItemHeaderBinding
 import com.example.lab4.databinding.ItemScheduleBinding
+import com.example.lab4.data.local.IconManager
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
 class ScheduleAdapter(
     private var schedules: List<ScheduleResponseDto>,
+    private val iconManager: IconManager,
     private val onItemClick: (ScheduleResponseDto) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -49,15 +51,15 @@ class ScheduleAdapter(
 
         val newItems = mutableListOf<ListItem>()
         if (morning.isNotEmpty()) {
-            newItems.add(ListItem.Header("Morning", R.drawable.ic_status_pending)) // Need sun icon, using placeholder
+            newItems.add(ListItem.Header("Morning", R.drawable.ic_status_pending)) 
             newItems.addAll(morning.map { ListItem.Item(it) })
         }
         if (afternoon.isNotEmpty()) {
-            newItems.add(ListItem.Header("Afternoon", R.drawable.ic_status_pending)) // Need cloud/sun icon
+            newItems.add(ListItem.Header("Afternoon", R.drawable.ic_status_pending)) 
             newItems.addAll(afternoon.map { ListItem.Item(it) })
         }
         if (night.isNotEmpty()) {
-            newItems.add(ListItem.Header("Night", R.drawable.ic_status_pending)) // Need moon icon
+            newItems.add(ListItem.Header("Night", R.drawable.ic_status_pending)) 
             newItems.addAll(night.map { ListItem.Item(it) })
         }
         items = newItems
@@ -71,7 +73,6 @@ class ScheduleAdapter(
             val cal = java.util.Calendar.getInstance()
             if (date != null) {
                 cal.time = date
-                // Convert to local time
                 cal.timeZone = TimeZone.getDefault()
                 cal.get(java.util.Calendar.HOUR_OF_DAY)
             } else 0
@@ -105,13 +106,11 @@ class ScheduleAdapter(
             is ListItem.Header -> {
                 val h = holder as HeaderViewHolder
                 h.binding.headerTextView.text = item.title
-                // Set icon color based on section? For now use white/yellow
                 if (item.title == "Morning" || item.title == "Afternoon") {
                     h.binding.iconImageView.setColorFilter(h.itemView.context.getColor(R.color.yellow_sun))
                 } else {
                     h.binding.iconImageView.setColorFilter(h.itemView.context.getColor(R.color.purple_moon))
                 }
-                // Ideally load different icons for sun/moon
             }
             is ListItem.Item -> {
                 val h = holder as ItemViewHolder
@@ -133,12 +132,78 @@ class ScheduleAdapter(
                         timeTextView.text = schedule.start_time
                     }
 
-                    // Status Icon
-                    if (schedule.status == "completed") {
-                        statusImageView.setImageResource(R.drawable.ic_status_completed)
+                    // Icon Logic
+                    val habitId = schedule.habit?.id ?: -1
+                    val localIcon = iconManager.getIconForHabit(habitId)
+                    
+                    val iconName = if (localIcon != null) {
+                        localIcon
                     } else {
-                        statusImageView.setImageResource(R.drawable.ic_status_pending)
+                        // Fallback: description parsing
+                        val description = schedule.habit?.description ?: ""
+                        val iconRegex = "\\|icon:([a-zA-Z0-9_]+)\\|".toRegex()
+                        val matchResult = iconRegex.find(description)
+                        matchResult?.groupValues?.get(1) ?: schedule.habit?.icon ?: schedule.icon ?: "ic_activity_generic"
                     }
+                    
+                    android.util.Log.d("ScheduleAdapter", "Item ${schedule.id} (Habit ${habitId}): Icon -> $iconName (Local: $localIcon)")
+
+                    val context = root.context
+                    val resourceId = context.resources.getIdentifier(iconName, "drawable", context.packageName)
+                    
+                    if (resourceId != 0) {
+                        iconImageView.setImageResource(resourceId)
+                    } else {
+                        iconImageView.setImageResource(R.drawable.ic_activity_generic)
+                    }
+
+                    // Status Visuals
+                    if (schedule.status == "Completed") {
+                         root.alpha = 0.6f 
+                         iconImageView.alpha = 0.6f
+                         
+                         statusImageView.visibility = android.view.View.VISIBLE
+                         progressTextView.visibility = android.view.View.GONE
+                         
+                         statusImageView.setImageResource(R.drawable.ic_check)
+                         statusImageView.background = context.getDrawable(R.drawable.bg_circle_green)
+                         statusImageView.imageTintList = android.content.res.ColorStateList.valueOf(context.getColor(R.color.white))
+                         statusImageView.setPadding(4,4,4,4) 
+                    } else if (schedule.status == "Skipped") {
+                         root.alpha = 0.6f
+                         statusImageView.visibility = android.view.View.VISIBLE
+                         progressTextView.visibility = android.view.View.GONE
+                         
+                         statusImageView.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                         statusImageView.setColorFilter(null) // clear tint
+                         statusImageView.imageTintList = android.content.res.ColorStateList.valueOf(context.getColor(R.color.white))
+                         statusImageView.background = context.getDrawable(R.drawable.bg_circle_red)
+                         statusImageView.setPadding(4,4,4,4)
+                    } else {
+                         // Planned / Pending
+                         root.alpha = 1.0f
+                         iconImageView.alpha = 1.0f
+                         
+                         statusImageView.visibility = android.view.View.GONE
+                         progressTextView.visibility = android.view.View.VISIBLE
+                         
+                         val totalLogged = schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
+                         val goal = schedule.duration_minutes ?: 0
+                         
+                         // Goal parsing
+                         val habitGoal = schedule.habit?.goal ?: "${schedule.duration_minutes} Minutes"
+                         val unit = habitGoal.split(" ").getOrElse(1) { "m" }
+                         // Compact unit
+                         val shortUnit = when(unit.lowercase()) {
+                             "minutes", "minute" -> "m"
+                             "hours", "hour" -> "h"
+                             "times", "time" -> "x"
+                             else -> unit.take(1)
+                         }
+                         
+                         progressTextView.text = "$totalLogged/$goal$shortUnit"
+                    }
+
 
                     root.setOnClickListener {
                         onItemClick(schedule)

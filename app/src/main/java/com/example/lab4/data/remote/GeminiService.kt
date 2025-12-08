@@ -12,4 +12,9 @@ interface GeminiService {
     suspend fun getIconSuggestion(
         @Body request: GeminiRequest
     ): GeminiResponse
+
+    @POST("v1beta/models/gemini-pro:generateContent")
+    suspend fun generateContent(
+        @Body request: GeminiRequest
+    ): GeminiResponse
 }

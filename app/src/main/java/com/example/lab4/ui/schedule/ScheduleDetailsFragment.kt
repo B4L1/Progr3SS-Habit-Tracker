@@ -100,6 +100,10 @@ class ScheduleDetailsFragment : Fragment() {
                     findNavController().navigate(R.id.action_scheduleDetailsFragment_to_editScheduleFragment, bundle)
                     true
                 }
+                R.id.action_skip -> {
+                    skipSchedule()
+                    true
+                }
                 R.id.action_delete -> {
                     confirmDelete()
                     true
@@ -168,6 +172,11 @@ class ScheduleDetailsFragment : Fragment() {
         val timeRange = formatTimeRange(schedule.start_time, schedule.duration_minutes ?: 30)
         binding.timeRangeTextView.text = timeRange
 
+        // Partners (Placeholder for now, but hide if empty)
+        // Since backend doesn't support partners yet, we will just hide it as requested
+        binding.lblPartner.visibility = View.GONE
+        binding.partnerContainer.visibility = View.GONE
+
         // Calculate progress
         val totalLogged = schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
         val goal = schedule.duration_minutes ?: 1
@@ -176,17 +185,30 @@ class ScheduleDetailsFragment : Fragment() {
         binding.statusProgressIndicator.progress = progressPercent
         
         val green = requireContext().getColor(R.color.green_completed)
+        val red = requireContext().getColor(android.R.color.holo_red_light)
         val purple = requireContext().getColor(R.color.purple_200)
         val white = requireContext().getColor(R.color.white)
 
         if (schedule.status == "Completed") {
             binding.statusCheckmark.visibility = View.VISIBLE
             binding.statusCheckmark.setImageResource(R.drawable.ic_check)
-            binding.statusCheckmark.setColorFilter(white)
+            binding.statusCheckmark.background = requireContext().getDrawable(R.drawable.bg_circle_green)
+            binding.statusCheckmark.imageTintList = android.content.res.ColorStateList.valueOf(white)
+            binding.statusCheckmark.setPadding(4,4,4,4) // Ensure checkmark is smaller than circle
+
             binding.statusProgressIndicator.setIndicatorColor(green)
-            
             binding.statusLabelSmall.text = "Completed"
             binding.statusLabelSmall.setTextColor(green)
+        } else if (schedule.status == "Skipped") {
+            binding.statusCheckmark.visibility = View.VISIBLE
+            binding.statusCheckmark.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            binding.statusCheckmark.background = requireContext().getDrawable(R.drawable.bg_circle_red)
+            binding.statusCheckmark.imageTintList = android.content.res.ColorStateList.valueOf(white)
+            binding.statusCheckmark.setPadding(4,4,4,4)
+
+            binding.statusProgressIndicator.setIndicatorColor(red)
+            binding.statusLabelSmall.text = "Skipped"
+            binding.statusLabelSmall.setTextColor(red)
         } else {
             binding.statusCheckmark.visibility = View.INVISIBLE
             binding.statusProgressIndicator.setIndicatorColor(purple)
@@ -195,7 +217,18 @@ class ScheduleDetailsFragment : Fragment() {
             binding.statusLabelSmall.setTextColor(requireContext().getColor(android.R.color.darker_gray))
         }
 
-        binding.valDuration.text = "${schedule.duration_minutes ?: 30}m"
+        // Goal parsing - duration_minutes is always stored in minutes
+        // So we should display consistently in minutes
+        val habitGoal = schedule.habit?.goal ?: "${schedule.duration_minutes} Minutes"
+        val parts = habitGoal.split(" ")
+        val originalUnit = if (parts.size > 1) parts[1].lowercase() else "minutes"
+        
+        // Since duration_minutes is always in minutes, we display in minutes
+        // But we should use a short format
+        val displayUnit = "m" // Always show as minutes since that's the stored unit
+        
+        binding.valDuration.text = "${goal}m"
+        binding.progressText.text = "$totalLogged / ${goal}m"
         
         // Repeat
         binding.valRepeat.text = if (schedule.is_custom) "Once" else "Recurring"
@@ -206,6 +239,25 @@ class ScheduleDetailsFragment : Fragment() {
         val historyAdapter = HistoryAdapter(schedule.progress ?: emptyList(), schedule.habit?.name ?: "Habit")
         binding.historyRecyclerView.layoutManager = LinearLayoutManager(context)
         binding.historyRecyclerView.adapter = historyAdapter
+    }
+
+    private fun skipSchedule() {
+        val service = RetrofitClient.createService(ScheduleService::class.java)
+        val updateDto = UpdateScheduleDto(status = "Skipped", notes = currentSchedule?.notes)
+        
+        service.updateSchedule(scheduleId, updateDto).enqueue(object : Callback<ScheduleResponseDto> {
+            override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
+                if (response.isSuccessful) {
+                    Toast.makeText(context, "Schedule Skipped", Toast.LENGTH_SHORT).show()
+                    fetchScheduleDetails()
+                } else {
+                    Toast.makeText(context, "Failed to skip", Toast.LENGTH_SHORT).show()
+                }
+            }
+            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
+                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 
     private fun formatTimeRange(startTimeIso: String, durationMinutes: Int): String {
@@ -243,18 +295,42 @@ class ScheduleDetailsFragment : Fragment() {
 
         override fun onBindViewHolder(holder: HistoryViewHolder, position: Int) {
             val item = history[position]
-            val isCompleted = item.is_completed ?: true
+            val isCompleted = item.is_completed ?: false
+            val loggedTime = item.logged_time ?: 0
             
-            if (isCompleted) {
-                holder.binding.statusIcon.setImageResource(android.R.drawable.checkbox_on_background)
-                holder.binding.statusIcon.setColorFilter(holder.itemView.context.getColor(R.color.green_completed))
-                holder.binding.historyTitleTextView.text = "Completed $habitName"
-                holder.binding.historyTimeTextView.setTextColor(holder.itemView.context.getColor(R.color.green_completed))
-            } else {
-                holder.binding.statusIcon.setImageResource(android.R.drawable.ic_delete)
-                holder.binding.statusIcon.setColorFilter(holder.itemView.context.getColor(android.R.color.holo_red_light))
-                holder.binding.historyTitleTextView.text = "Missed $habitName"
-                holder.binding.historyTimeTextView.setTextColor(holder.itemView.context.getColor(android.R.color.holo_red_light))
+            val context = holder.itemView.context
+            
+            when {
+                isCompleted -> {
+                    // Completed
+                    holder.binding.statusIcon.setImageResource(R.drawable.ic_check)
+                    holder.binding.statusIcon.background = context.getDrawable(R.drawable.bg_circle_green)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(R.color.white))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Completed $habitName"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(R.color.green_completed))
+                }
+                loggedTime > 0 -> {
+                    // In Progress (has logged time but not marked completed)
+                    holder.binding.statusIcon.setImageResource(R.drawable.ic_status_pending) // Or a "partial" icon
+                    holder.binding.statusIcon.background = context.getDrawable(R.drawable.bg_icon_circle)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(R.color.purple_200))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Added progress to $habitName"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(R.color.purple_200))
+                }
+                else -> {
+                    // Missed (no logged time and not completed)
+                    holder.binding.statusIcon.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+                    holder.binding.statusIcon.background = context.getDrawable(R.drawable.bg_circle_red)
+                    holder.binding.statusIcon.setColorFilter(context.getColor(R.color.white))
+                    holder.binding.statusIcon.setPadding(4,4,4,4)
+                    
+                    holder.binding.historyTitleTextView.text = "Missed $habitName"
+                    holder.binding.historyTimeTextView.setTextColor(context.getColor(android.R.color.holo_red_light))
+                }
             }
 
              try {
@@ -263,7 +339,7 @@ class ScheduleDetailsFragment : Fragment() {
                  holder.binding.historyDateTextView.text = item.date
              }
 
-            holder.binding.historyTimeTextView.text = "${item.logged_time ?: 0}m"
+            holder.binding.historyTimeTextView.text = "${loggedTime}m"
         }
 
         override fun getItemCount() = history.size

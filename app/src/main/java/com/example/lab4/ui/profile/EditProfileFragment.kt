@@ -98,7 +98,10 @@ class EditProfileFragment : Fragment() {
                     if (selectedImageUri == null && !profile.profileImageUrl.isNullOrEmpty()) {
                         var imageUrl = profile.profileImageUrl ?: ""
                         if (imageUrl.contains("localhost")) {
-                            imageUrl = imageUrl.replace("localhost", "10.52.64.147")
+                            val currentBaseUrl = RetrofitClient.BASE_URL
+                            // Extract just the host (IP and port)
+                            val host = currentBaseUrl.removePrefix("http://").removePrefix("https://").substringBefore("/")
+                            imageUrl = imageUrl.replace("localhost:3000", host).replace("localhost", host.substringBefore(":"))
                         }
                         val finalUrl = if (imageUrl.startsWith("http")) {
                             imageUrl
