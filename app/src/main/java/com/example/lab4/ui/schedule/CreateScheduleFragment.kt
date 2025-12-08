@@ -1,5 +1,6 @@
 package com.example.lab4.ui.schedule
 
+import android.app.AlertDialog
 import android.app.TimePickerDialog
 import android.os.Bundle
 import android.util.Log
@@ -11,6 +12,7 @@ import android.widget.Button
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+
 import androidx.navigation.fragment.findNavController
 import com.example.lab4.R
 import com.example.lab4.data.model.*
@@ -34,7 +36,9 @@ class CreateScheduleFragment : Fragment() {
     private var durationMinutes = 30
     private var habits: List<HabitResponseDto> = emptyList()
     private var selectedHabit: HabitResponseDto? = null
-    private var selectedRepeatMode = "none"
+    private var selectedRepeatMode = "daily"
+    private var customDays = mutableListOf<Int>() // 1=Monday...7=Sunday
+    private var pendingHabitId: Int? = null
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -64,8 +68,13 @@ class CreateScheduleFragment : Fragment() {
             findNavController().navigate(R.id.action_createScheduleFragment_to_createHabitFragment)
         }
 
-        childFragmentManager.setFragmentResultListener("requestKey_habitCreated", viewLifecycleOwner) { _, bundle ->
+        // Use setFragmentResultListener on parentFragmentManager (since we are siblings in nav)
+        parentFragmentManager.setFragmentResultListener("requestKey_habitCreated", this) { _, bundle ->
             if (bundle.getBoolean("created")) {
+                pendingHabitId = bundle.getInt("habitId")
+                // If ID is found, fetchHabits will find and select it
+                // If bundle doesn't have ID (old behavior), pendingHabitId is 0 or null
+                if (pendingHabitId == 0) pendingHabitId = null 
                 fetchHabits()
             }
         }
@@ -109,8 +118,43 @@ class CreateScheduleFragment : Fragment() {
             button.setOnClickListener {
                 updateRepeatSelection(button, buttons.map { it.first })
                 selectedRepeatMode = mode
+                
+                if (mode == "custom") {
+                    showCustomDayPicker()
+                }
             }
         }
+        
+        // precise initial selection
+        updateRepeatSelection(binding.btnEveryDay, buttons.map { it.first })
+    }
+    
+    private fun showCustomDayPicker() {
+        val dayNames = arrayOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        val checkedItems = BooleanArray(7) { index -> customDays.contains(index + 1) }
+        
+        AlertDialog.Builder(requireContext())
+            .setTitle("Select Days")
+            .setMultiChoiceItems(dayNames, checkedItems) { _, which, isChecked ->
+                val dayValue = which + 1 // 1=Monday...7=Sunday
+                if (isChecked) {
+                    if (!customDays.contains(dayValue)) {
+                        customDays.add(dayValue)
+                    }
+                } else {
+                    customDays.remove(dayValue)
+                }
+            }
+            .setPositiveButton("OK") { dialog, _ ->
+                customDays.sort()
+                if (customDays.isEmpty()) {
+                    Toast.makeText(context, "No days selected, using daily", Toast.LENGTH_SHORT).show()
+                    customDays.addAll(listOf(1, 2, 3, 4, 5, 6, 7))
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun updateRepeatSelection(selected: Button, allButtons: List<Button>) {
@@ -124,7 +168,7 @@ class CreateScheduleFragment : Fragment() {
     }
 
     private fun setupGoalInput() {
-        val units = listOf("Minutes", "Hours", "Times")
+        val units = listOf("Times", "Minutes", "Hours", "Pages", "Steps")
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, units)
         binding.unitSpinner.setAdapter(adapter)
         binding.unitSpinner.setText(units[0], false)
@@ -141,6 +185,17 @@ class CreateScheduleFragment : Fragment() {
                 if (response.isSuccessful && response.body() != null) {
                     habits = response.body()!!
                     setupHabitSelector()
+                    
+                    // Pre-select pending habit if exists
+                    pendingHabitId?.let { id ->
+                        val habitToSelect = habits.find { it.id == id }
+                        habitToSelect?.let {
+                            binding.habitAutoComplete.setText(it.name, false)
+                            selectedHabit = it
+                            applyHabitDefaults(it)
+                        }
+                        pendingHabitId = null
+                    }
                 }
             }
 
@@ -157,23 +212,51 @@ class CreateScheduleFragment : Fragment() {
         
         binding.habitAutoComplete.setOnItemClickListener { _, _, position, _ ->
             selectedHabit = habits[position]
-            // Pre-fill goal if available
-            selectedHabit?.goal?.let { goalStr ->
-                // Expected format: "30 Minutes" or "10 Times"
-                val parts = goalStr.split(" ")
-                if (parts.size >= 2) {
-                    binding.amountEditText.setText(parts[0])
-                    val unit = parts.drop(1).joinToString(" ").replaceFirstChar { it.uppercase() } 
-                    // Set spinner if unit matches
-                    val adapter = binding.unitSpinner.adapter as ArrayAdapter<String>
-                    val currentPos = adapter.getPosition(unit)
-                    if (currentPos >= 0) {
-                        binding.unitSpinner.setText(unit, false)
+            applyHabitDefaults(selectedHabit!!)
+        }
+    }
+
+    private fun applyHabitDefaults(habit: HabitResponseDto) {
+        habit.goal?.let { goalStr ->
+            // Expected format: "30 Minutes" or "2 Hours" or "10 Times"
+            val parts = goalStr.split(" ")
+            if (parts.size >= 2) {
+                binding.amountEditText.setText(parts[0])
+                // Join remaining parts and Title Case it for matching
+                val unit = parts.drop(1).joinToString(" ").trim().lowercase().replaceFirstChar { it.uppercase() }
+                
+                // Set text directly first (so it shows up)
+                binding.unitSpinner.setText(unit, false)
+                
+                // We don't need to strictly search the adapter because NoFilterAdapter 
+                // will show all items regardless of what is set. 
+                // But we should ensure the unit is valid or perhaps select the closest match if we wanted validation.
+                // For now, setting it directly is fine as long as it matches one of our strings ("Hours" etc.)
+            }
+        }
+    }
+    
+    // Custom Adapter to disable filtering
+    /* 
+    inner class NoFilterAdapter(context: android.content.Context, val items: List<String>) : 
+        ArrayAdapter<String>(context, android.R.layout.simple_dropdown_item_1line, items) {
+        
+        override fun getFilter(): android.widget.Filter {
+            return object : android.widget.Filter() {
+                override fun performFiltering(constraint: CharSequence?): android.widget.Filter.FilterResults {
+                    return android.widget.Filter.FilterResults().apply {
+                        values = items
+                        count = items.size
                     }
+                }
+                override fun publishResults(constraint: CharSequence?, results: android.widget.Filter.FilterResults?) {
+                    notifyDataSetChanged()
                 }
             }
         }
     }
+    */
+
 
     private fun saveSchedule() {
         if (selectedHabit == null) {
@@ -230,8 +313,11 @@ class CreateScheduleFragment : Fragment() {
                 "daily" -> listOf(1, 2, 3, 4, 5, 6, 7)
                 "weekdays" -> listOf(1, 2, 3, 4, 5)
                 "weekends" -> listOf(6, 7)
-                else -> listOf(1, 2, 3, 4, 5, 6, 7) // Default or custom logic
+                "custom" -> if (customDays.isNotEmpty()) customDays.toList() else listOf(1, 2, 3, 4, 5, 6, 7)
+                else -> listOf(1, 2, 3, 4, 5, 6, 7)
             }
+            
+            Log.d("CreateSchedule", "Creating recurring: daysOfWeek=$daysOfWeek, start_time=$startTimeIso, habitId=${selectedHabit!!.id}")
 
             val request = CreateRecurringScheduleDto(
                 habitId = selectedHabit!!.id,

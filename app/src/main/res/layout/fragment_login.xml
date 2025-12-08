@@ -118,7 +118,9 @@
             android:hint="your@email.com"
             android:textColorHint="@android:color/darker_gray"
             android:textColor="@android:color/white"
-            android:inputType="textEmailAddress" />
+            android:inputType="textEmailAddress"
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <TextView
@@ -156,7 +158,9 @@
             android:hint="Your password"
             android:textColorHint="@android:color/darker_gray"
             android:textColor="@android:color/white"
-            android:inputType="textPassword" />
+            android:inputType="textPassword"
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
     </com.google.android.material.textfield.TextInputLayout>
     
     <TextView

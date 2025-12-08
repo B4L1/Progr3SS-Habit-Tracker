@@ -217,18 +217,29 @@ class ScheduleDetailsFragment : Fragment() {
             binding.statusLabelSmall.setTextColor(requireContext().getColor(android.R.color.darker_gray))
         }
 
-        // Goal parsing - duration_minutes is always stored in minutes
-        // So we should display consistently in minutes
+        // Goal parsing - duration_minutes is stored in minutes, 
+        // but for display we want to respect the habit's original unit/goal if possible.
+        // The backend stores 'goal' string e.g. "2 Times" or "30 Minutes"
+        // And 'duration_minutes' as the calculated time.
+        
         val habitGoal = schedule.habit?.goal ?: "${schedule.duration_minutes} Minutes"
         val parts = habitGoal.split(" ")
-        val originalUnit = if (parts.size > 1) parts[1].lowercase() else "minutes"
+        val amount = parts.getOrNull(0)?.toIntOrNull() ?: schedule.duration_minutes ?: 0
+        val unit = parts.getOrNull(1) ?: "Minutes"
         
-        // Since duration_minutes is always in minutes, we display in minutes
-        // But we should use a short format
-        val displayUnit = "m" // Always show as minutes since that's the stored unit
+        // Compact unit for progress text e.g. "2m" or "2x"
+        val shortUnit = when(unit.lowercase()) {
+             "minutes", "minute" -> "m"
+             "hours", "hour" -> "h"
+             "times", "time" -> "x"
+             "pages", "page" -> "p"
+             "steps", "step" -> "st"
+             else -> unit.take(1)
+         }
         
-        binding.valDuration.text = "${goal}m"
-        binding.progressText.text = "$totalLogged / ${goal}m"
+        // Update labels
+        binding.valDuration.text = "$amount$shortUnit" // was Duration, now Goal
+        binding.progressText.text = "$totalLogged / $amount$shortUnit"
         
         // Repeat
         binding.valRepeat.text = if (schedule.is_custom) "Once" else "Recurring"

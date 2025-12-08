@@ -83,9 +83,7 @@ class ProfileFragment : Fragment() {
                 override fun onFailure(call: Call<Void>, t: Throwable) {}
             })
         }
-
         tokenManager.clearTokens()
-        com.example.lab4.data.local.IconManager(requireContext()).clear()
         findNavController().navigate(R.id.action_profileFragment_to_loginFragment)
     }
 
@@ -111,10 +109,7 @@ class ProfileFragment : Fragment() {
 
                         // Fix for localhost URLs if running on Android Emulator/Device
                         if (imageUrl.contains("localhost")) {
-                            val currentBaseUrl = RetrofitClient.BASE_URL
-                            // Extract just the host (IP and port)
-                            val host = currentBaseUrl.removePrefix("http://").removePrefix("https://").substringBefore("/")
-                            imageUrl = imageUrl.replace("localhost:3000", host).replace("localhost", host.substringBefore(":")) 
+                            imageUrl = imageUrl.replace("localhost", "10.137.157.147") 
                         }
 
                         // Handle URL construction
@@ -185,11 +180,11 @@ class ProfileFragment : Fragment() {
                 call: Call<List<HabitResponseDto>>,
                 response: Response<List<HabitResponseDto>>
             ) {
-                // Guard against view being destroyed
                 if (_binding == null) return
                 
                 if (response.isSuccessful && response.body() != null) {
-                    setupHabitsRecyclerView(response.body()!!)
+                    val habits = response.body()!!
+                    fetchTodaySchedules(habits)
                 }
             }
 
@@ -199,16 +194,43 @@ class ProfileFragment : Fragment() {
         })
     }
 
-    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>) {
-        // Guard against view being destroyed  
+    private fun fetchTodaySchedules(habits: List<HabitResponseDto>) {
+        val service = RetrofitClient.createService(com.example.lab4.data.remote.ScheduleService::class.java)
+        
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val today = dateFormat.format(java.util.Date())
+        
+        service.getSchedules(today).enqueue(object : Callback<List<com.example.lab4.data.model.ScheduleResponseDto>> {
+            override fun onResponse(
+                call: Call<List<com.example.lab4.data.model.ScheduleResponseDto>>,
+                response: Response<List<com.example.lab4.data.model.ScheduleResponseDto>>
+            ) {
+                if (_binding == null) return
+                
+                val schedules = response.body() ?: emptyList()
+                setupHabitsRecyclerView(habits, schedules)
+            }
+
+            override fun onFailure(call: Call<List<com.example.lab4.data.model.ScheduleResponseDto>>, t: Throwable) {
+                if (_binding == null) return
+                setupHabitsRecyclerView(habits, emptyList())
+            }
+        })
+    }
+
+    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>, schedules: List<com.example.lab4.data.model.ScheduleResponseDto>) {
         if (_binding == null) return
         
-        val adapter = HabitAdapter(habits)
+        val adapter = HabitAdapter(habits, schedules)
         binding.habitsRecyclerView.layoutManager = LinearLayoutManager(context)
         binding.habitsRecyclerView.adapter = adapter
     }
 
-    class HabitAdapter(private val habits: List<HabitResponseDto>) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
+    class HabitAdapter(
+        private val habits: List<HabitResponseDto>,
+        private val schedules: List<com.example.lab4.data.model.ScheduleResponseDto>
+    ) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
+        
         class HabitViewHolder(val binding: ItemHabitBinding) : RecyclerView.ViewHolder(binding.root)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HabitViewHolder {
@@ -220,8 +242,43 @@ class ProfileFragment : Fragment() {
             val habit = habits[position]
             holder.binding.habitName.text = habit.name
             holder.binding.habitGoal.text = habit.goal
+            
+            // Find schedules for this habit
+            val habitSchedules = schedules.filter { it.habit?.id == habit.id }
+            
+            if (habitSchedules.isEmpty()) {
+                // "No schedule" state: distinct visual (faded/gray line)
+                holder.binding.habitProgressBar.progress = 0
+                holder.binding.habitProgressBar.alpha = 0.3f // Fade out to look like a "gray line"
+            } else {
+                holder.binding.habitProgressBar.alpha = 1.0f // Reset alpha
+                
+                val totalGoal = habitSchedules.sumOf { it.duration_minutes ?: 0 }
+                
+                // Calculate total logged time
+                // If status is "Completed", we assume full duration is achieved 
+                // UNLESS the actual logs are somehow higher (though unlikely).
+                // Otherwise, sum the logs.
+                val calculatedProgress = habitSchedules.sumOf { schedule ->
+                    if (schedule.status == "Completed") {
+                        // For completed items, take the max of duration or logged time
+                        // This ensures if they did EXTRA, it counts, but if they just clicked Complete, it fills.
+                        val logged = schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
+                        val duration = schedule.duration_minutes ?: 0
+                        if (logged > duration) logged else duration
+                    } else {
+                        schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
+                    }
+                }
+                
+                val percentage = if (totalGoal > 0) {
+                    ((calculatedProgress.toDouble() / totalGoal.toDouble()) * 100).toInt().coerceIn(0, 100)
+                } else 0
+                
+                holder.binding.habitProgressBar.progress = percentage
+            }
         }
-
+        
         override fun getItemCount() = habits.size
     }
 

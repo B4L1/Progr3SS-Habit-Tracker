@@ -163,7 +163,8 @@ class ScheduleAdapter(
                          iconImageView.alpha = 0.6f
                          
                          statusImageView.visibility = android.view.View.VISIBLE
-                         progressTextView.visibility = android.view.View.GONE
+                         statusImageView.visibility = android.view.View.VISIBLE
+                         progressIndicator.visibility = android.view.View.GONE
                          
                          statusImageView.setImageResource(R.drawable.ic_check)
                          statusImageView.background = context.getDrawable(R.drawable.bg_circle_green)
@@ -172,7 +173,8 @@ class ScheduleAdapter(
                     } else if (schedule.status == "Skipped") {
                          root.alpha = 0.6f
                          statusImageView.visibility = android.view.View.VISIBLE
-                         progressTextView.visibility = android.view.View.GONE
+                         statusImageView.visibility = android.view.View.VISIBLE
+                         progressIndicator.visibility = android.view.View.GONE
                          
                          statusImageView.setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
                          statusImageView.setColorFilter(null) // clear tint
@@ -185,23 +187,18 @@ class ScheduleAdapter(
                          iconImageView.alpha = 1.0f
                          
                          statusImageView.visibility = android.view.View.GONE
-                         progressTextView.visibility = android.view.View.VISIBLE
+                         statusImageView.visibility = android.view.View.GONE
+                         progressIndicator.visibility = android.view.View.VISIBLE
                          
                          val totalLogged = schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
-                         val goal = schedule.duration_minutes ?: 0
+                         val goal = schedule.duration_minutes ?: 1 // avoid div by zero
                          
-                         // Goal parsing
-                         val habitGoal = schedule.habit?.goal ?: "${schedule.duration_minutes} Minutes"
-                         val unit = habitGoal.split(" ").getOrElse(1) { "m" }
-                         // Compact unit
-                         val shortUnit = when(unit.lowercase()) {
-                             "minutes", "minute" -> "m"
-                             "hours", "hour" -> "h"
-                             "times", "time" -> "x"
-                             else -> unit.take(1)
-                         }
+                         // Calculate progress percentage (0-100)
+                         val percentage = if (goal > 0) {
+                             ((totalLogged.toDouble() / goal.toDouble()) * 100).toInt().coerceIn(0, 100)
+                         } else 0
                          
-                         progressTextView.text = "$totalLogged/$goal$shortUnit"
+                         progressIndicator.setProgress(percentage)
                     }
 
 

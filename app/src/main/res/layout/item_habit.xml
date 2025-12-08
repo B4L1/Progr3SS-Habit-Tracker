@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
@@ -17,6 +18,17 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textSize="14sp"
-        android:layout_marginTop="4dp" />
+        android:layout_marginTop="4dp"
+        android:textColor="@android:color/white"/>
+
+    <com.google.android.material.progressindicator.LinearProgressIndicator
+        android:id="@+id/habitProgressBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        app:trackColor="@color/input_field_bg"
+        app:indicatorColor="@color/purple_200"
+        app:trackThickness="6dp"
+        app:trackCornerRadius="3dp"/>
 
 </LinearLayout>

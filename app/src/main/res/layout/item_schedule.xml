@@ -55,14 +55,15 @@
             app:layout_constraintEnd_toStartOf="@id/statusImageView"
             app:layout_constraintBottom_toBottomOf="parent"/>
 
-        <TextView
-            android:id="@+id/progressTextView"
+        <com.google.android.material.progressindicator.CircularProgressIndicator
+            android:id="@+id/progressIndicator"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="0/1"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:textColor="@color/purple_200"
+            app:indicatorSize="24dp"
+            app:trackThickness="3dp"
+            app:indicatorColor="@color/purple_200"
+            app:trackColor="@color/dark_blue_bg"
+            android:max="100"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintTop_toTopOf="parent"
             app:layout_constraintBottom_toBottomOf="parent"

@@ -25,7 +25,7 @@ interface ScheduleService {
     @POST("schedule/custom")
     fun createCustomSchedule(@Body request: CreateCustomScheduleDto): Call<ScheduleResponseDto>
 
-    @POST("schedule/recurring")
+    @POST("schedule/recurring/weekdays")
     fun createRecurringSchedule(@Body request: CreateRecurringScheduleDto): Call<List<ScheduleResponseDto>>
 
     @POST("progress")

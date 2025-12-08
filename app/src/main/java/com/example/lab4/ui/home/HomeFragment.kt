@@ -78,7 +78,12 @@ class HomeFragment : Fragment() {
 
     private fun fetchSchedules() {
         val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.getSchedules(null).enqueue(object : Callback<List<ScheduleResponseDto>> {
+        
+        // Get today's date in yyyy-MM-dd format
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val todayDate = dateFormat.format(Date())
+        
+        service.getSchedules(todayDate).enqueue(object : Callback<List<ScheduleResponseDto>> {
             override fun onResponse(
                 call: Call<List<ScheduleResponseDto>>,
                 response: Response<List<ScheduleResponseDto>>

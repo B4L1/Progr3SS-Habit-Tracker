@@ -82,6 +82,9 @@ class LoginFragment : Fragment() {
         val savedEmail = tokenManager.getEmail()
         if (!savedEmail.isNullOrEmpty()) {
             binding.emailEditText.setText(savedEmail)
+        } else {
+             binding.emailEditText.setText("test@example.com")
+             binding.passwordEditText.setText("password123")
         }
 
         // DEBUG: Check for saved tokens
