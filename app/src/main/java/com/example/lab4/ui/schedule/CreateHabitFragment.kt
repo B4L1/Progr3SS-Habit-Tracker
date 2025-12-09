@@ -24,6 +24,8 @@ import com.example.lab4.data.model.Part
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class CreateHabitFragment : Fragment() {
     private var _binding: FragmentCreateHabitBinding? = null
@@ -198,13 +200,22 @@ class CreateHabitFragment : Fragment() {
             // Basic validation to ensure it returns a valid icon from our list
             if (iconList.contains(candidateText)) {
                 android.util.Log.d("CreateHabit", "Icon valid: $candidateText")
+                withContext(Dispatchers.Main) { 
+                    Toast.makeText(context, "AI chose: $candidateText", Toast.LENGTH_SHORT).show()
+                }
                 candidateText
             } else {
-                android.util.Log.d("CreateHabit", "Icon invalid/not found, using generic.")
+                android.util.Log.d("CreateHabit", "Icon invalid/not found ($candidateText), using generic.")
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(context, "AI chose invalid '$candidateText', using generic.", Toast.LENGTH_LONG).show()
+                }
                 "ic_activity_generic"
             }
         } catch (e: Exception) {
-            android.util.Log.e("CreateHabit", "Gemini error: ${e.message}")
+            android.util.Log.e("CreateHabit", "Gemini error: ${e.message}", e)
+            withContext(Dispatchers.Main) {
+                Toast.makeText(context, "AI Error: ${e.message}", Toast.LENGTH_LONG).show()
+            }
             // Fallback
             "ic_activity_generic"
         }

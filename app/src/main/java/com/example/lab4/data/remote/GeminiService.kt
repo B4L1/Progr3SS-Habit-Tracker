@@ -8,12 +8,12 @@ import retrofit2.http.POST
 interface GeminiService {
     // This is a placeholder for the Gemini API endpoint.
     // The RetrofitClient will add the Authorization header if `BuildConfig.GEMINI_API_KEY` is set.
-    @POST("v1beta/models/gemini-pro:generateContent")
+    @POST("v1beta/models/gemini-2.5-flash:generateContent")
     suspend fun getIconSuggestion(
         @Body request: GeminiRequest
     ): GeminiResponse
 
-    @POST("v1beta/models/gemini-pro:generateContent")
+    @POST("v1beta/models/gemini-2.5-flash:generateContent")
     suspend fun generateContent(
         @Body request: GeminiRequest
     ): GeminiResponse
