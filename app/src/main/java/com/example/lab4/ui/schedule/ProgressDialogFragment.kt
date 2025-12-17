@@ -11,21 +11,29 @@ import android.widget.Toast
 import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.fragment.app.setFragmentResult
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import com.example.lab4.data.model.CreateProgressDto
-import com.example.lab4.data.model.ProgressResponseDto
-import com.example.lab4.data.model.ScheduleResponseDto
 import com.example.lab4.data.model.UpdateScheduleDto
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.data.remote.ScheduleService
+import com.example.lab4.data.repository.ScheduleRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.DialogProgressBinding
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 
 class ProgressDialogFragment : DialogFragment() {
     private var _binding: DialogProgressBinding? = null
     private val binding get() = _binding!!
     
+    private val viewModel: ScheduleViewModel by viewModels {
+        ScheduleViewModelFactory(
+            ScheduleRepository(
+                RetrofitClient.createService(ScheduleService::class.java)
+            )
+        )
+    }
+
     private var scheduleId: Int = -1
     private var date: String = ""
     private var status: String = "Planned"
@@ -93,6 +101,8 @@ class ProgressDialogFragment : DialogFragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        
+        observeViewModel()
 
         binding.completedCheckBox.isChecked = (status == "Completed")
         
@@ -147,23 +157,51 @@ class ProgressDialogFragment : DialogFragment() {
             .show()
     }
 
-    private fun deleteSchedule() {
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.deleteSchedule(scheduleId).enqueue(object : Callback<Void> {
-            override fun onResponse(call: Call<Void>, response: Response<Void>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(context, "Schedule deleted", Toast.LENGTH_SHORT).show()
-                    setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
-                    dismiss()
-                } else {
-                    Toast.makeText(context, "Failed to delete: ${response.code()}", Toast.LENGTH_SHORT).show()
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.deleteScheduleState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        Toast.makeText(context, "Schedule deleted", Toast.LENGTH_SHORT).show()
+                        setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
+                        dismiss()
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
                 }
             }
-
-            override fun onFailure(call: Call<Void>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.progressState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        Toast.makeText(context, "Progress updated!", Toast.LENGTH_SHORT).show()
+                        setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
+                        dismiss()
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, "Error: ${state.message}", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
             }
-        })
+        }
+        
+        // Also listen for update errors if updateAndCreateProgress fails at update stage
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.updateScheduleState.collect { state ->
+                if (state is UiState.Error) {
+                    Toast.makeText(context, "Update Failed: ${state.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    private fun deleteSchedule() {
+        viewModel.deleteSchedule(scheduleId)
     }
 
     private fun saveProgress() {
@@ -172,61 +210,22 @@ class ProgressDialogFragment : DialogFragment() {
         val loggedTime = if (loggedTimeStr.isNotEmpty()) loggedTimeStr.toInt() else 0
         val isCompleted = binding.completedCheckBox.isChecked
 
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-
         val newStatus = if (isCompleted) "Completed" else "Planned"
         
         val updateRequest = UpdateScheduleDto(
             status = newStatus,
             notes = if (notes.isNotEmpty()) notes else null
         )
-
-        service.updateSchedule(scheduleId, updateRequest).enqueue(object : Callback<ScheduleResponseDto> {
-            override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
-                if (response.isSuccessful) {
-                    createProgressEntry(service, notes, if (loggedTime > 0) loggedTime else null, isCompleted)
-                } else {
-                    Toast.makeText(context, "Failed to update status: ${response.code()}", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
-    private fun createProgressEntry(service: ScheduleService, notes: String, loggedTime: Int?, isCompleted: Boolean) {
-        val request = CreateProgressDto(
+        
+        val progressRequest = CreateProgressDto(
             scheduleId = scheduleId,
             date = date,
-            logged_time = loggedTime,
+            logged_time = if (loggedTime > 0) loggedTime else null,
             notes = if (notes.isNotEmpty()) notes else null,
             is_completed = isCompleted
         )
 
-        service.createProgress(request).enqueue(object : Callback<ProgressResponseDto> {
-            override fun onResponse(
-                call: Call<ProgressResponseDto>,
-                response: Response<ProgressResponseDto>
-            ) {
-                if (response.isSuccessful) {
-                    Toast.makeText(context, "Progress updated!", Toast.LENGTH_SHORT).show()
-                    setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
-                    dismiss()
-                } else {
-                    Toast.makeText(context, "Status updated, but log failed: ${response.code()}", Toast.LENGTH_SHORT).show()
-                    setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
-                    dismiss()
-                }
-            }
-
-            override fun onFailure(call: Call<ProgressResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Status updated, but error logging: ${t.message}", Toast.LENGTH_SHORT).show()
-                setFragmentResult("requestKey_progressUpdated", bundleOf("updated" to true))
-                dismiss()
-            }
-        })
+        viewModel.updateAndCreateProgress(scheduleId, updateRequest, progressRequest)
     }
 
     override fun onDestroyView() {

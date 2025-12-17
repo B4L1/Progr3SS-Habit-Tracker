@@ -25,14 +25,14 @@ interface AuthService {
 
     @Multipart
     @POST("auth/local/signup")
-    fun register(
+    suspend fun register(
         @Part("username") username: RequestBody,
         @Part("email") email: RequestBody,
         @Part("password") password: RequestBody
-    ): Call<AuthResponseDto>
+    ): AuthResponseDto
 
     @POST("auth/local/signin")
-    fun login(@Body request: SignInDto): Call<AuthResponseDto>
+    suspend fun login(@Body request: SignInDto): AuthResponseDto
 
     @POST("auth/local/logout")
     fun logout(@Header("Authorization") token: String): Call<Void>

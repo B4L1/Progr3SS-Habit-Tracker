@@ -8,6 +8,8 @@ import android.view.ViewGroup
 import android.widget.PopupMenu
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -17,11 +19,11 @@ import com.example.lab4.data.model.ScheduleResponseDto
 import com.example.lab4.data.model.UpdateScheduleDto
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.data.remote.ScheduleService
+import com.example.lab4.data.repository.ScheduleRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentScheduleDetailsBinding
 import com.example.lab4.databinding.ItemProgressHistoryBinding
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -29,8 +31,16 @@ import java.util.TimeZone
 class ScheduleDetailsFragment : Fragment() {
     private var _binding: FragmentScheduleDetailsBinding? = null
     private val binding get() = _binding!!
-    private var scheduleId: Int = -1
+   private var scheduleId: Int = -1
     private var currentSchedule: ScheduleResponseDto? = null
+    
+    private val viewModel: ScheduleViewModel by viewModels {
+        ScheduleViewModelFactory(
+            ScheduleRepository(
+                RetrofitClient.createService(ScheduleService::class.java)
+            )
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,11 +61,61 @@ class ScheduleDetailsFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         setupButtons()
+        observeViewModel()
         fetchScheduleDetails()
 
         childFragmentManager.setFragmentResultListener("requestKey_progressUpdated", viewLifecycleOwner) { _, bundle ->
             if (bundle.getBoolean("updated")) {
                 fetchScheduleDetails()
+            }
+        }
+    }
+    
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.scheduleDetailState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        currentSchedule = state.data
+                        updateUI(state.data)
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.deleteScheduleState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        Toast.makeText(context, "Schedule deleted", Toast.LENGTH_SHORT).show()
+                        viewModel.resetDeleteState()
+                        findNavController().navigateUp()
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, "Failed to delete", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.updateScheduleState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        Toast.makeText(context, "Schedule Skipped", Toast.LENGTH_SHORT).show()
+                        viewModel.resetUpdateState()
+                        fetchScheduleDetails()
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, "Failed to skip", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
             }
         }
     }
@@ -126,47 +186,31 @@ class ScheduleDetailsFragment : Fragment() {
     }
 
     private fun deleteSchedule() {
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.deleteSchedule(scheduleId).enqueue(object : Callback<Void> {
-            override fun onResponse(call: Call<Void>, response: Response<Void>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(context, "Schedule deleted", Toast.LENGTH_SHORT).show()
-                    findNavController().navigateUp()
-                } else {
-                    Toast.makeText(context, "Failed to delete", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<Void>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
+        viewModel.deleteSchedule(scheduleId)
     }
 
     private fun fetchScheduleDetails() {
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.getScheduleById(scheduleId).enqueue(object : Callback<ScheduleResponseDto> {
-            override fun onResponse(
-                call: Call<ScheduleResponseDto>,
-                response: Response<ScheduleResponseDto>
-            ) {
-                if (response.isSuccessful && response.body() != null) {
-                    val schedule = response.body()!!
-                    currentSchedule = schedule
-                    updateUI(schedule)
-                } else {
-                    Toast.makeText(context, "Failed to load details", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
+        viewModel.fetchScheduleById(scheduleId)
     }
 
     private fun updateUI(schedule: ScheduleResponseDto) {
         binding.habitNameTextView.text = schedule.habit?.name ?: "Custom Activity"
+        
+        // Load Icon
+        val context = requireContext()
+        val iconManager = com.example.lab4.data.local.IconManager(context)
+        schedule.habit?.let { habit ->
+            val iconName = iconManager.getIconForHabit(habit.id)
+            if (iconName != null) {
+                val resId = context.resources.getIdentifier(iconName, "drawable", context.packageName)
+                if (resId != 0) {
+                    val drawable = androidx.core.content.ContextCompat.getDrawable(context, resId)
+                    // Set as compound drawable (Left of text)
+                    binding.habitNameTextView.setCompoundDrawablesWithIntrinsicBounds(drawable, null, null, null)
+                    binding.habitNameTextView.compoundDrawablePadding = 16 // 16dp padding
+                }
+            }
+        }
         
         // Format Time Range
         val timeRange = formatTimeRange(schedule.start_time, schedule.duration_minutes ?: 30)
@@ -253,22 +297,8 @@ class ScheduleDetailsFragment : Fragment() {
     }
 
     private fun skipSchedule() {
-        val service = RetrofitClient.createService(ScheduleService::class.java)
         val updateDto = UpdateScheduleDto(status = "Skipped", notes = currentSchedule?.notes)
-        
-        service.updateSchedule(scheduleId, updateDto).enqueue(object : Callback<ScheduleResponseDto> {
-            override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(context, "Schedule Skipped", Toast.LENGTH_SHORT).show()
-                    fetchScheduleDetails()
-                } else {
-                    Toast.makeText(context, "Failed to skip", Toast.LENGTH_SHORT).show()
-                }
-            }
-            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
+        viewModel.updateSchedule(scheduleId, updateDto)
     }
 
     private fun formatTimeRange(startTimeIso: String, durationMinutes: Int): String {

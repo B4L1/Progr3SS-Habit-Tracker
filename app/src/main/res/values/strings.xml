@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Lab4</string>
+    <string name="app_name">Progr3SS Habit Tracker</string>
     <!-- TODO: Remove or change this placeholder text -->
     <string name="hello_login_fragment">Hello login fragment</string>
     <string name="hello_register_fragment">Hello register fragment</string>

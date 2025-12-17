@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Lab4"
+rootProject.name = "Progr3SS Habit Tracker"
 include(":app")

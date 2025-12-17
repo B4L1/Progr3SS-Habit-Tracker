@@ -9,21 +9,23 @@ import android.widget.Toast
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.setFragmentResult
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import com.example.lab4.data.model.CreateHabitDto
 import com.example.lab4.data.model.HabitCategoryResponseDto
 import com.example.lab4.data.model.HabitResponseDto
 import com.example.lab4.data.remote.HabitService
 import com.example.lab4.data.remote.RetrofitClient
+import com.example.lab4.data.repository.HabitRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentCreateHabitBinding
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import com.example.lab4.data.model.Content
 import com.example.lab4.data.model.GeminiRequest
 import com.example.lab4.data.model.Part
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -33,6 +35,14 @@ class CreateHabitFragment : Fragment() {
     
     private var categories: List<HabitCategoryResponseDto> = emptyList()
     private var selectedCategoryId: Int? = null
+    
+    private val viewModel: HabitViewModel by viewModels {
+        HabitViewModelFactory(
+            HabitRepository(
+                RetrofitClient.createService(HabitService::class.java)
+            )
+        )
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -45,6 +55,7 @@ class CreateHabitFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        observeViewModel()
         fetchCategories()
         setupGoalInputs()
 
@@ -56,6 +67,55 @@ class CreateHabitFragment : Fragment() {
             createHabit()
         }
     }
+    
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.categoriesState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        categories = state.data
+                        if (categories.isNotEmpty()) {
+                            setupCategorySelector()
+                        } else {
+                            Toast.makeText(context, "No categories available", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, "Failed to load categories", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.createHabitState.collect { state ->
+                when (state) {
+                    is UiState.Loading -> {
+                        binding.saveButton.isEnabled = false
+                    }
+                    is UiState.Success -> {
+                        binding.saveButton.isEnabled = true
+                        val createdHabit = state.data
+                        Toast.makeText(context, "Habit created with AI icon!", Toast.LENGTH_SHORT).show()
+                        setFragmentResult("requestKey_habitCreated", bundleOf(
+                            "created" to true,
+                            "habitId" to createdHabit.id
+                        ))
+                        viewModel.resetCreateState()
+                        findNavController().navigateUp()
+                    }
+                    is UiState.Error -> {
+                        binding.saveButton.isEnabled = true
+                        Toast.makeText(context, "Failed: ${state.message}", Toast.LENGTH_LONG).show()
+                    }
+                    else -> {
+                        binding.saveButton.isEnabled = true
+                    }
+                }
+            }
+        }
+    }
 
     private fun setupGoalInputs() {
         val units = listOf("Times", "Minutes", "Hours", "Pages", "Steps")
@@ -65,28 +125,7 @@ class CreateHabitFragment : Fragment() {
     }
 
     private fun fetchCategories() {
-        val service = RetrofitClient.createService(HabitService::class.java)
-        service.getHabitCategories().enqueue(object : Callback<List<HabitCategoryResponseDto>> {
-            override fun onResponse(
-                call: Call<List<HabitCategoryResponseDto>>,
-                response: Response<List<HabitCategoryResponseDto>>
-            ) {
-                if (response.isSuccessful && response.body() != null) {
-                    categories = response.body()!!
-                    if (categories.isNotEmpty()) {
-                        setupCategorySelector()
-                    } else {
-                        Toast.makeText(context, "No categories available", Toast.LENGTH_SHORT).show()
-                    }
-                } else {
-                    Toast.makeText(context, "Failed to load categories", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<List<HabitCategoryResponseDto>>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
+        viewModel.fetchCategories()
     }
 
     private fun setupCategorySelector() {
@@ -131,7 +170,6 @@ class CreateHabitFragment : Fragment() {
 
         // Use lifecycleScope to call suspend functions
         lifecycleScope.launch {
-            binding.saveButton.isEnabled = false
             Toast.makeText(context, "Analyzing habit...", Toast.LENGTH_SHORT).show()
             
             val iconName = getIconSuggestion(name, description)
@@ -150,35 +188,19 @@ class CreateHabitFragment : Fragment() {
                 categoryId = selectedCategoryId ?: categories.first().id
             )
 
-            val service = RetrofitClient.createService(HabitService::class.java)
-            service.createHabit(request).enqueue(object : Callback<HabitResponseDto> {
-                override fun onResponse(
-                    call: Call<HabitResponseDto>,
-                    response: Response<HabitResponseDto>
-                ) {
-                    binding.saveButton.isEnabled = true
-                    if (response.isSuccessful) {
-                        val createdHabit = response.body()
-                        if (createdHabit != null) {
-                            val iconManager = com.example.lab4.data.local.IconManager(requireContext())
-                            iconManager.saveIconForHabit(createdHabit.id, iconName)
-                        }
-                        
-                        Toast.makeText(context, "Habit created with AI icon!", Toast.LENGTH_SHORT).show()
-                        setFragmentResult("requestKey_habitCreated", bundleOf("created" to true))
-                        findNavController().navigateUp()
-                    } else {
-                        val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                        android.util.Log.e("CreateHabit", "Error creating habit: $errorBody")
-                        Toast.makeText(context, "Failed: ${response.code()} - $errorBody", Toast.LENGTH_LONG).show()
+            // Save icon locally
+            viewModel.createHabit(request)
+            
+            // After creation, the StateFlow observer will handle the response
+            // But we need to save the icon locally, so we'll do it in the observer
+            lifecycleScope.launch {
+                viewModel.createHabitState.collect { state ->
+                    if (state is UiState.Success) {
+                        val iconManager = com.example.lab4.data.local.IconManager(requireContext())
+                        iconManager.saveIconForHabit(state.data.id, iconName)
                     }
                 }
-
-                override fun onFailure(call: Call<HabitResponseDto>, t: Throwable) {
-                    binding.saveButton.isEnabled = true
-                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                }
-            })
+            }
         }
     }
 

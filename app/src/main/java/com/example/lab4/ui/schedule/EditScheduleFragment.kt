@@ -8,6 +8,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -16,11 +18,11 @@ import com.example.lab4.data.model.ScheduleResponseDto
 import com.example.lab4.data.model.UpdateScheduleDto
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.data.remote.ScheduleService
+import com.example.lab4.data.repository.ScheduleRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentEditScheduleBinding
 import com.example.lab4.databinding.ItemProgressHistoryBinding
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -31,6 +33,14 @@ class EditScheduleFragment : Fragment() {
     private val binding get() = _binding!!
     private var scheduleId: Int = -1
     private val calendar = Calendar.getInstance()
+    
+    private val viewModel: ScheduleViewModel by viewModels {
+        ScheduleViewModelFactory(
+            ScheduleRepository(
+                RetrofitClient.createService(ScheduleService::class.java)
+            )
+        )
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,6 +61,7 @@ class EditScheduleFragment : Fragment() {
         super.onViewCreated(view, savedInstanceState)
 
         setupStartTimePicker()
+        observeViewModel()
         fetchScheduleDetails()
 
         binding.cancelButton.setOnClickListener {
@@ -61,26 +72,52 @@ class EditScheduleFragment : Fragment() {
             saveSchedule()
         }
     }
-
-    private fun fetchScheduleDetails() {
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.getScheduleById(scheduleId).enqueue(object : Callback<ScheduleResponseDto> {
-            override fun onResponse(
-                call: Call<ScheduleResponseDto>,
-                response: Response<ScheduleResponseDto>
-            ) {
-                if (response.isSuccessful && response.body() != null) {
-                    val schedule = response.body()!!
-                    populateUI(schedule)
-                } else {
-                    Toast.makeText(context, "Failed to load details", Toast.LENGTH_SHORT).show()
+    
+    private fun observeViewModel() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.scheduleDetailState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        populateUI(state.data)
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
                 }
             }
-
-            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.updateScheduleState.collect { state ->
+                when (state) {
+                    is UiState.Loading -> {
+                        binding.saveButton.isEnabled = false
+                        binding.saveButton.text = "Saving..."
+                    }
+                    is UiState.Success -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                        Toast.makeText(context, "Schedule updated", Toast.LENGTH_SHORT).show()
+                        viewModel.resetUpdateState()
+                        findNavController().navigateUp()
+                    }
+                    is UiState.Error -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                    }
+                }
             }
-        })
+        }
+    }
+
+    private fun fetchScheduleDetails() {
+        viewModel.fetchScheduleById(scheduleId)
     }
 
     private fun populateUI(schedule: ScheduleResponseDto) {
@@ -122,21 +159,7 @@ class EditScheduleFragment : Fragment() {
             notes = notes
         )
 
-        val service = RetrofitClient.createService(ScheduleService::class.java)
-        service.updateSchedule(scheduleId, request).enqueue(object : Callback<ScheduleResponseDto> {
-            override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
-                if (response.isSuccessful) {
-                    Toast.makeText(context, "Schedule updated", Toast.LENGTH_SHORT).show()
-                    findNavController().navigateUp()
-                } else {
-                    Toast.makeText(context, "Failed to update", Toast.LENGTH_SHORT).show()
-                }
-            }
-
-            override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-            }
-        })
+        viewModel.updateSchedule(scheduleId, request)
     }
 
     private fun setupStartTimePicker() {

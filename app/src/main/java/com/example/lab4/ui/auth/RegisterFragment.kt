@@ -7,25 +7,34 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.FragmentNavigatorExtras
 import androidx.navigation.fragment.findNavController
 import androidx.transition.TransitionInflater
 import com.example.lab4.R
 import com.example.lab4.data.local.TokenManager
-import com.example.lab4.data.model.AuthResponseDto
 import com.example.lab4.data.remote.RetrofitClient
+import com.example.lab4.data.repository.AuthRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentRegisterBinding
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.toRequestBody
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 
 class RegisterFragment : Fragment() {
     private var _binding: FragmentRegisterBinding? = null
     private val binding get() = _binding!!
     private lateinit var tokenManager: TokenManager
     private val TAG = "RegisterFragment"
+
+    // ViewModel with Factory for dependency injection
+    private val viewModel: RegisterViewModel by viewModels {
+        RegisterViewModelFactory(
+            AuthRepository(
+                RetrofitClient.authService,
+                TokenManager(requireContext())
+            )
+        )
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -43,6 +52,14 @@ class RegisterFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        tokenManager = TokenManager(requireContext())
+
+        setupUI()
+        observeViewModel()
+        setupClickListeners()
+    }
+
+    private fun setupUI() {
         // Set colored title "Progr3SS" with blue '3'
         val titleText = "Progr3SS"
         val spannableString = android.text.SpannableString(titleText)
@@ -53,8 +70,6 @@ class RegisterFragment : Fragment() {
             android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
         )
         binding.titleTextView.text = spannableString
-
-        tokenManager = TokenManager(requireContext())
 
         // Animation for input fields appearing from top to bottom
         val viewsToAnimate = listOf(
@@ -79,7 +94,54 @@ class RegisterFragment : Fragment() {
                 .setStartDelay(index * 50L)
                 .start()
         }
+    }
 
+    private fun observeViewModel() {
+        // Observe registration state
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewModel.registerState.collect { state ->
+                when (state) {
+                    is UiState.Idle -> {
+                        // Do nothing
+                    }
+                    
+                    is UiState.Loading -> {
+                        binding.registerButton.isEnabled = false
+                        binding.registerButton.text = "Registering..."
+                    }
+                    
+                    is UiState.Success -> {
+                        binding.registerButton.isEnabled = true
+                        binding.registerButton.text = "Register"
+                        
+                        Toast.makeText(context, "Registration successful", Toast.LENGTH_SHORT).show()
+                        findNavController().navigate(R.id.action_registerFragment_to_homeFragment)
+                        
+                        viewModel.resetState()
+                    }
+                    
+                    is UiState.Error -> {
+                        binding.registerButton.isEnabled = true
+                        binding.registerButton.text = "Register"
+                        
+                        // Clear previous errors
+                        binding.nameInputLayout.error = null
+                        binding.emailInputLayout.error = null
+                        binding.passwordInputLayout.error = null
+                        binding.confirmPasswordInputLayout.error = null
+                        
+                        // Show error
+                        Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+                        Log.e(TAG, "Registration failed: ${state.message}")
+                        
+                        viewModel.resetState()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setupClickListeners() {
         binding.registerButton.setOnClickListener {
             val name = binding.nameEditText.text.toString().trim()
             val email = binding.emailEditText.text.toString().trim()
@@ -87,67 +149,24 @@ class RegisterFragment : Fragment() {
             val confirmPassword = binding.confirmPasswordEditText.text.toString()
 
             // Reset errors
-            binding.passwordInputLayout.error = null
-            binding.confirmPasswordInputLayout.error = null
             binding.nameInputLayout.error = null
             binding.emailInputLayout.error = null
+            binding.passwordInputLayout.error = null
+            binding.confirmPasswordInputLayout.error = null
 
-            var isValid = true
-
-            if (name.isEmpty()) {
-                binding.nameInputLayout.error = "Name is required"
-                isValid = false
-            }
-            if (email.isEmpty()) {
-                binding.emailInputLayout.error = "Email is required"
-                isValid = false
-            }
-            if (password.isEmpty()) {
-                binding.passwordInputLayout.error = "Password is required"
-                isValid = false
-            }
+            // Check password match locally (UI validation)
             if (password != confirmPassword) {
                 binding.passwordInputLayout.error = "Passwords do not match"
                 binding.confirmPasswordInputLayout.error = "Passwords do not match"
-                isValid = false
+                return@setOnClickListener
             }
 
-            if (!isValid) return@setOnClickListener
-
-            val nameBody = name.toRequestBody("text/plain".toMediaTypeOrNull())
-            val emailBody = email.toRequestBody("text/plain".toMediaTypeOrNull())
-            val passwordBody = password.toRequestBody("text/plain".toMediaTypeOrNull())
-
-            RetrofitClient.authService.register(nameBody, emailBody, passwordBody)
-                .enqueue(object : Callback<AuthResponseDto> {
-                    override fun onResponse(
-                        call: Call<AuthResponseDto>,
-                        response: Response<AuthResponseDto>
-                    ) {
-                        if (response.isSuccessful && response.body() != null) {
-                            val authResponse = response.body()!!
-                            tokenManager.saveAccessToken(authResponse.tokens.accessToken)
-                            tokenManager.saveRefreshToken(authResponse.tokens.refreshToken)
-                            tokenManager.saveEmail(email) // Save email on successful registration
-                            
-                            Toast.makeText(context, "Registration successful", Toast.LENGTH_SHORT).show()
-                            
-                            findNavController().navigate(R.id.action_registerFragment_to_homeFragment)
-                        } else {
-                            Log.e(TAG, "Registration failed: ${response.code()}")
-                            Toast.makeText(context, "Registration failed: ${response.message()}", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-
-                    override fun onFailure(call: Call<AuthResponseDto>, t: Throwable) {
-                        Log.e(TAG, "Registration error", t)
-                        Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                    }
-                })
+            // Trigger registration via ViewModel
+            viewModel.register(email, password, name)
         }
 
         binding.googleSignInButton.setOnClickListener {
-             Toast.makeText(context, "Google Sign-In coming soon!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Google Sign-In coming soon!", Toast.LENGTH_SHORT).show()
         }
 
         binding.loginTab.setOnClickListener {

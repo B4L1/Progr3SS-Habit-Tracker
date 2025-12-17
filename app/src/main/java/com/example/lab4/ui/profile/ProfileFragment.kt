@@ -7,6 +7,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import coil.load
@@ -15,13 +17,17 @@ import com.example.lab4.R
 import com.example.lab4.data.local.TokenManager
 import com.example.lab4.data.model.HabitResponseDto
 import com.example.lab4.data.model.ProfileResponseDto
+import com.example.lab4.data.remote.AuthService
 import com.example.lab4.data.remote.HabitService
 import com.example.lab4.data.remote.RetrofitClient
+import com.example.lab4.data.repository.HabitRepository
+import com.example.lab4.data.repository.ProfileRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentProfileBinding
 import com.example.lab4.databinding.ItemHabitBinding
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import com.example.lab4.ui.schedule.HabitViewModel
+import com.example.lab4.ui.schedule.HabitViewModelFactory
+import kotlinx.coroutines.launch
 import androidx.recyclerview.widget.RecyclerView
 
 class ProfileFragment : Fragment() {
@@ -30,6 +36,22 @@ class ProfileFragment : Fragment() {
     private lateinit var tokenManager: TokenManager
     private var userId: Int = -1
     private val TAG = "ProfileFragment"
+    
+    private val profileViewModel: ProfileViewModel by viewModels {
+        ProfileViewModelFactory(
+            ProfileRepository(
+                RetrofitClient.createService(AuthService::class.java)
+            )
+        )
+    }
+    
+    private val habitViewModel: HabitViewModel by viewModels {
+        HabitViewModelFactory(
+            HabitRepository(
+                RetrofitClient.createService(HabitService::class.java)
+            )
+        )
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
@@ -44,12 +66,40 @@ class ProfileFragment : Fragment() {
         tokenManager = TokenManager(requireContext())
 
         setupButtons()
+        observeViewModels()
         fetchProfile()
 
         childFragmentManager.setFragmentResultListener("requestKey_habitCreated", viewLifecycleOwner) { _, bundle ->
             if (bundle.getBoolean("created")) {
                 if (userId != -1) {
                     fetchHabits(userId)
+                }
+            }
+        }
+    }
+    
+    private fun observeViewModels() {
+        viewLifecycleOwner.lifecycleScope.launch {
+            profileViewModel.profileState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        updateProfileUI(state.data)
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
+            }
+        }
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            habitViewModel.habitsState.collect { state ->
+                when (state) {
+                    is UiState.Success -> {
+                        setupHabitsRecyclerView(state.data)
+                    }
+                    else -> {}
                 }
             }
         }
@@ -78,159 +128,76 @@ class ProfileFragment : Fragment() {
     private fun performLogout() {
         val token = tokenManager.getAccessToken()
         if (token != null) {
-            RetrofitClient.authService.logout("Bearer $token").enqueue(object : Callback<Void> {
-                override fun onResponse(call: Call<Void>, response: Response<Void>) {}
-                override fun onFailure(call: Call<Void>, t: Throwable) {}
-            })
+            profileViewModel.logout(token)
         }
         tokenManager.clearTokens()
         findNavController().navigate(R.id.action_profileFragment_to_loginFragment)
     }
 
     private fun fetchProfile() {
-        RetrofitClient.authService.getProfile().enqueue(object : Callback<ProfileResponseDto> {
-            override fun onResponse(
-                call: Call<ProfileResponseDto>,
-                response: Response<ProfileResponseDto>
-            ) {
-                // Guard against view being destroyed
-                if (_binding == null) return
-                
-                if (response.isSuccessful && response.body() != null) {
-                    val profile = response.body()!!
-                    binding.userInfoTextView.text = getString(R.string.user_info_format, profile.username, profile.email, profile.description ?: "")
-                    userId = profile.id
-                    
-                    Log.d(TAG, "Profile URL from server: ${profile.profileImageUrl}")
+        profileViewModel.fetchProfile()
+    }
 
-                    // Load profile image
-                    if (!profile.profileImageUrl.isNullOrEmpty()) {
-                        var imageUrl = profile.profileImageUrl
+    
+    private fun updateProfileUI(profile: ProfileResponseDto) {
+        // Guard against view being destroyed
+        if (_binding == null) return
+        
+        binding.userInfoTextView.text = getString(R.string.user_info_format, profile.username, profile.email, profile.description ?: "")
+        userId = profile.id
+        
+        Log.d(TAG, "Profile URL from server: ${profile.profileImageUrl}")
 
-                        // Fix for localhost URLs if running on Android Emulator/Device
-                        if (imageUrl.contains("localhost")) {
-                            imageUrl = imageUrl.replace("localhost", "10.137.157.147") 
-                        }
+        // Load profile image
+        if (!profile.profileImageUrl.isNullOrEmpty()) {
+            var imageUrl = profile.profileImageUrl
 
-                        // Handle URL construction
-                        val finalUrl = if (imageUrl.startsWith("http")) {
-                            imageUrl
-                        } else {
-                            val baseUrl = RetrofitClient.BASE_URL.removeSuffix("/")
-                            val relativeUrl = imageUrl.removePrefix("/")
-                            "$baseUrl/$relativeUrl"
-                        }
-                        
-                        Log.d(TAG, "Loading profile image from: $finalUrl")
-
-                        // Use current time to bust cache
-                        val timestamp = System.currentTimeMillis()
-                        val separator = if (finalUrl.contains("?")) "&" else "?"
-                        
-                        binding.profileImageView.load("$finalUrl${separator}t=$timestamp") {
-                            placeholder(android.R.drawable.sym_def_app_icon)
-                            error(android.R.drawable.sym_def_app_icon)
-                            memoryCachePolicy(CachePolicy.DISABLED)
-                            diskCachePolicy(CachePolicy.DISABLED)
-                            
-                            // Add Auth header in case the image is protected
-                            tokenManager.getAccessToken()?.let { token ->
-                                addHeader("Authorization", "Bearer $token")
-                            }
-                            
-                            listener(
-                                onError = { _, result ->
-                                    Log.e(TAG, "Coil Error: ${result.throwable.message}")
-                                    context?.let {
-                                        Toast.makeText(it, "Image Load Error: ${result.throwable.message}", Toast.LENGTH_LONG).show()
-                                    }
-                                },
-                                onSuccess = { _, _ ->
-                                    Log.d(TAG, "Image loaded successfully")
-                                }
-                            )
-                        }
-                    } else {
-                        Log.d(TAG, "Profile image URL is null or empty")
-                        // Toast.makeText(context, "No profile image URL found", Toast.LENGTH_SHORT).show()
-                        // Reset to default if no image
-                        binding.profileImageView.setImageResource(android.R.drawable.sym_def_app_icon)
-                    }
-                    
-                    fetchHabits(profile.id)
-                } else {
-                    context?.let {
-                        Toast.makeText(it, "Failed to load profile", Toast.LENGTH_SHORT).show()
-                    }
-                }
+            // Fix for localhost URLs
+            if (imageUrl.contains("localhost")) {
+                imageUrl = imageUrl.replace("localhost", "10.52.64.147") 
             }
 
-            override fun onFailure(call: Call<ProfileResponseDto>, t: Throwable) {
-                context?.let {
-                    Toast.makeText(it, "Error loading profile", Toast.LENGTH_SHORT).show()
+            val finalUrl = if (imageUrl.startsWith("http")) {
+                imageUrl
+            } else {
+                val baseUrl = RetrofitClient.BASE_URL.removeSuffix("/")
+                val relativeUrl = imageUrl.removePrefix("/")
+                "$baseUrl/$relativeUrl"
+            }
+            
+            val timestamp = System.currentTimeMillis()
+            val separator = if (finalUrl.contains("?")) "&" else "?"
+            
+            binding.profileImageView.load("$finalUrl${separator}t=$timestamp") {
+                placeholder(android.R.drawable.sym_def_app_icon)
+                error(android.R.drawable.sym_def_app_icon)
+                memoryCachePolicy(CachePolicy.DISABLED)
+                diskCachePolicy(CachePolicy.DISABLED)
+                tokenManager.getAccessToken()?.let { token ->
+                    addHeader("Authorization", "Bearer $token")
                 }
             }
-        })
+        } else {
+            binding.profileImageView.setImageResource(android.R.drawable.sym_def_app_icon)
+        }
+        
+        fetchHabits(profile.id)
     }
 
     private fun fetchHabits(userId: Int) {
-        val service = RetrofitClient.createService(HabitService::class.java)
-        service.getHabitsByUser(userId).enqueue(object : Callback<List<HabitResponseDto>> {
-            override fun onResponse(
-                call: Call<List<HabitResponseDto>>,
-                response: Response<List<HabitResponseDto>>
-            ) {
-                if (_binding == null) return
-                
-                if (response.isSuccessful && response.body() != null) {
-                    val habits = response.body()!!
-                    fetchTodaySchedules(habits)
-                }
-            }
-
-            override fun onFailure(call: Call<List<HabitResponseDto>>, t: Throwable) {
-                // Silent fail or log
-            }
-        })
+        habitViewModel.fetchHabits()
     }
 
-    private fun fetchTodaySchedules(habits: List<HabitResponseDto>) {
-        val service = RetrofitClient.createService(com.example.lab4.data.remote.ScheduleService::class.java)
-        
-        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
-        val today = dateFormat.format(java.util.Date())
-        
-        service.getSchedules(today).enqueue(object : Callback<List<com.example.lab4.data.model.ScheduleResponseDto>> {
-            override fun onResponse(
-                call: Call<List<com.example.lab4.data.model.ScheduleResponseDto>>,
-                response: Response<List<com.example.lab4.data.model.ScheduleResponseDto>>
-            ) {
-                if (_binding == null) return
-                
-                val schedules = response.body() ?: emptyList()
-                setupHabitsRecyclerView(habits, schedules)
-            }
-
-            override fun onFailure(call: Call<List<com.example.lab4.data.model.ScheduleResponseDto>>, t: Throwable) {
-                if (_binding == null) return
-                setupHabitsRecyclerView(habits, emptyList())
-            }
-        })
-    }
-
-    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>, schedules: List<com.example.lab4.data.model.ScheduleResponseDto>) {
+    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>) {
+        // Guard against view being destroyed  
         if (_binding == null) return
         
-        val adapter = HabitAdapter(habits, schedules)
+        val adapter = HabitAdapter(habits)
         binding.habitsRecyclerView.layoutManager = LinearLayoutManager(context)
         binding.habitsRecyclerView.adapter = adapter
     }
 
-    class HabitAdapter(
-        private val habits: List<HabitResponseDto>,
-        private val schedules: List<com.example.lab4.data.model.ScheduleResponseDto>
-    ) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
-        
+    class HabitAdapter(private val habits: List<HabitResponseDto>) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
         class HabitViewHolder(val binding: ItemHabitBinding) : RecyclerView.ViewHolder(binding.root)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HabitViewHolder {
@@ -242,43 +209,8 @@ class ProfileFragment : Fragment() {
             val habit = habits[position]
             holder.binding.habitName.text = habit.name
             holder.binding.habitGoal.text = habit.goal
-            
-            // Find schedules for this habit
-            val habitSchedules = schedules.filter { it.habit?.id == habit.id }
-            
-            if (habitSchedules.isEmpty()) {
-                // "No schedule" state: distinct visual (faded/gray line)
-                holder.binding.habitProgressBar.progress = 0
-                holder.binding.habitProgressBar.alpha = 0.3f // Fade out to look like a "gray line"
-            } else {
-                holder.binding.habitProgressBar.alpha = 1.0f // Reset alpha
-                
-                val totalGoal = habitSchedules.sumOf { it.duration_minutes ?: 0 }
-                
-                // Calculate total logged time
-                // If status is "Completed", we assume full duration is achieved 
-                // UNLESS the actual logs are somehow higher (though unlikely).
-                // Otherwise, sum the logs.
-                val calculatedProgress = habitSchedules.sumOf { schedule ->
-                    if (schedule.status == "Completed") {
-                        // For completed items, take the max of duration or logged time
-                        // This ensures if they did EXTRA, it counts, but if they just clicked Complete, it fills.
-                        val logged = schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
-                        val duration = schedule.duration_minutes ?: 0
-                        if (logged > duration) logged else duration
-                    } else {
-                        schedule.progress?.sumOf { it.logged_time ?: 0 } ?: 0
-                    }
-                }
-                
-                val percentage = if (totalGoal > 0) {
-                    ((calculatedProgress.toDouble() / totalGoal.toDouble()) * 100).toInt().coerceIn(0, 100)
-                } else 0
-                
-                holder.binding.habitProgressBar.progress = percentage
-            }
         }
-        
+
         override fun getItemCount() = habits.size
     }
 

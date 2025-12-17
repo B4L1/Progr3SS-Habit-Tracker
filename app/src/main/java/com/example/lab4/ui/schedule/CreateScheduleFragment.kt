@@ -12,17 +12,19 @@ import android.widget.Button
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
-
+import androidx.fragment.app.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import com.example.lab4.R
 import com.example.lab4.data.model.*
 import com.example.lab4.data.remote.HabitService
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.data.remote.ScheduleService
+import com.example.lab4.data.repository.HabitRepository
+import com.example.lab4.data.repository.ScheduleRepository
+import com.example.lab4.data.repository.common.UiState
 import com.example.lab4.databinding.FragmentCreateScheduleBinding
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -40,6 +42,23 @@ class CreateScheduleFragment : Fragment() {
     private var customDays = mutableListOf<Int>() // 1=Monday...7=Sunday
     private var pendingHabitId: Int? = null
 
+    // ViewModels
+    private val scheduleViewModel: ScheduleViewModel by viewModels {
+        ScheduleViewModelFactory(
+            ScheduleRepository(
+                RetrofitClient.createService(ScheduleService::class.java)
+            )
+        )
+    }
+
+    private val habitViewModel: HabitViewModel by viewModels {
+        HabitViewModelFactory(
+            HabitRepository(
+                RetrofitClient.createService(HabitService::class.java)
+            )
+        )
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
@@ -53,8 +72,10 @@ class CreateScheduleFragment : Fragment() {
 
         setupTimePicker()
         setupRepeatButtons()
-        fetchHabits()
         setupGoalInput()
+        observeViewModels()
+        
+        fetchHabits()
 
         binding.cancelButton.setOnClickListener {
             findNavController().navigateUp()
@@ -72,12 +93,74 @@ class CreateScheduleFragment : Fragment() {
         parentFragmentManager.setFragmentResultListener("requestKey_habitCreated", this) { _, bundle ->
             if (bundle.getBoolean("created")) {
                 pendingHabitId = bundle.getInt("habitId")
-                // If ID is found, fetchHabits will find and select it
-                // If bundle doesn't have ID (old behavior), pendingHabitId is 0 or null
                 if (pendingHabitId == 0) pendingHabitId = null 
                 fetchHabits()
             }
         }
+    }
+
+    private fun observeViewModels() {
+        // Observe habits state
+        viewLifecycleOwner.lifecycleScope.launch {
+            habitViewModel.habitsState.collect { state ->
+                when (state) {
+                    is UiState.Loading -> {
+                        // Could show loading indicator
+                    }
+                    is UiState.Success -> {
+                        habits = state.data
+                        setupHabitSelector()
+                        
+                        // Pre-select pending habit if exists
+                        pendingHabitId?.let { id ->
+                            val habitToSelect = habits.find { it.id == id }
+                            habitToSelect?.let {
+                                binding.habitAutoComplete.setText(it.name, false)
+                                selectedHabit = it
+                                applyHabitDefaults(it)
+                            }
+                            pendingHabitId = null
+                        }
+                    }
+                    is UiState.Error -> {
+                        Toast.makeText(context, "Failed to load habits", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        // Observe schedule creation state
+        viewLifecycleOwner.lifecycleScope.launch {
+            scheduleViewModel.createScheduleState.collect { state ->
+                when (state) {
+                    is UiState.Loading -> {
+                        binding.saveButton.isEnabled = false
+                        binding.saveButton.text = "Creating..."
+                    }
+                    is UiState.Success -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                        Toast.makeText(context, "Schedule created", Toast.LENGTH_SHORT).show()
+                        scheduleViewModel.resetCreateState()
+                        findNavController().navigateUp()
+                    }
+                    is UiState.Error -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                        Toast.makeText(context, "Failed: ${state.message}", Toast.LENGTH_LONG).show()
+                    }
+                    else -> {
+                        binding.saveButton.isEnabled = true
+                        binding.saveButton.text = "Save"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun fetchHabits() {
+        habitViewModel.fetchHabits()
     }
 
     private fun setupTimePicker() {
@@ -125,7 +208,7 @@ class CreateScheduleFragment : Fragment() {
             }
         }
         
-        // precise initial selection
+        // Set initial selection
         updateRepeatSelection(binding.btnEveryDay, buttons.map { it.first })
     }
     
@@ -175,36 +258,6 @@ class CreateScheduleFragment : Fragment() {
         binding.amountEditText.setText("30")
     }
 
-    private fun fetchHabits() {
-        val service = RetrofitClient.createService(HabitService::class.java)
-        service.getHabits().enqueue(object : Callback<List<HabitResponseDto>> {
-            override fun onResponse(
-                call: Call<List<HabitResponseDto>>,
-                response: Response<List<HabitResponseDto>>
-            ) {
-                if (response.isSuccessful && response.body() != null) {
-                    habits = response.body()!!
-                    setupHabitSelector()
-                    
-                    // Pre-select pending habit if exists
-                    pendingHabitId?.let { id ->
-                        val habitToSelect = habits.find { it.id == id }
-                        habitToSelect?.let {
-                            binding.habitAutoComplete.setText(it.name, false)
-                            selectedHabit = it
-                            applyHabitDefaults(it)
-                        }
-                        pendingHabitId = null
-                    }
-                }
-            }
-
-            override fun onFailure(call: Call<List<HabitResponseDto>>, t: Throwable) {
-                Toast.makeText(context, "Failed to load habits", Toast.LENGTH_SHORT).show()
-            }
-        })
-    }
-
     private fun setupHabitSelector() {
         val habitNames = habits.map { it.name }
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_dropdown_item_1line, habitNames)
@@ -224,39 +277,10 @@ class CreateScheduleFragment : Fragment() {
                 binding.amountEditText.setText(parts[0])
                 // Join remaining parts and Title Case it for matching
                 val unit = parts.drop(1).joinToString(" ").trim().lowercase().replaceFirstChar { it.uppercase() }
-                
-                // Set text directly first (so it shows up)
                 binding.unitSpinner.setText(unit, false)
-                
-                // We don't need to strictly search the adapter because NoFilterAdapter 
-                // will show all items regardless of what is set. 
-                // But we should ensure the unit is valid or perhaps select the closest match if we wanted validation.
-                // For now, setting it directly is fine as long as it matches one of our strings ("Hours" etc.)
             }
         }
     }
-    
-    // Custom Adapter to disable filtering
-    /* 
-    inner class NoFilterAdapter(context: android.content.Context, val items: List<String>) : 
-        ArrayAdapter<String>(context, android.R.layout.simple_dropdown_item_1line, items) {
-        
-        override fun getFilter(): android.widget.Filter {
-            return object : android.widget.Filter() {
-                override fun performFiltering(constraint: CharSequence?): android.widget.Filter.FilterResults {
-                    return android.widget.Filter.FilterResults().apply {
-                        values = items
-                        count = items.size
-                    }
-                }
-                override fun publishResults(constraint: CharSequence?, results: android.widget.Filter.FilterResults?) {
-                    notifyDataSetChanged()
-                }
-            }
-        }
-    }
-    */
-
 
     private fun saveSchedule() {
         if (selectedHabit == null) {
@@ -278,8 +302,6 @@ class CreateScheduleFragment : Fragment() {
         // Use YYYY-MM-DD for date
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val dateString = dateFormat.format(calendar.time)
-        
-        val scheduleService = RetrofitClient.createService(ScheduleService::class.java)
 
         if (selectedRepeatMode == "custom" || selectedRepeatMode == "none") {
             val request = CreateCustomScheduleDto(
@@ -290,25 +312,9 @@ class CreateScheduleFragment : Fragment() {
                 notes = null
             )
             
-            scheduleService.createCustomSchedule(request).enqueue(object : Callback<ScheduleResponseDto> {
-                override fun onResponse(call: Call<ScheduleResponseDto>, response: Response<ScheduleResponseDto>) {
-                    if (response.isSuccessful) {
-                        Toast.makeText(context, "Schedule created", Toast.LENGTH_SHORT).show()
-                        findNavController().navigateUp()
-                    } else {
-                        val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                        Log.e("CreateSchedule", "Error: $errorBody")
-                        Toast.makeText(context, "Failed: ${response.code()} - $errorBody", Toast.LENGTH_LONG).show()
-                    }
-                }
-                override fun onFailure(call: Call<ScheduleResponseDto>, t: Throwable) {
-                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                }
-            })
+            scheduleViewModel.createCustomSchedule(request)
         } else {
             // Map repeat mode to daysOfWeek
-            // 1=Monday, 7=Sunday. (Java Calendar: 2=Monday, 1=Sunday)
-            // Spec says 1=Monday...7=Sunday.
             val daysOfWeek = when (selectedRepeatMode) {
                 "daily" -> listOf(1, 2, 3, 4, 5, 6, 7)
                 "weekdays" -> listOf(1, 2, 3, 4, 5)
@@ -328,22 +334,7 @@ class CreateScheduleFragment : Fragment() {
                 notes = null
             )
 
-            scheduleService.createRecurringSchedule(request).enqueue(object : Callback<List<ScheduleResponseDto>> {
-                override fun onResponse(call: Call<List<ScheduleResponseDto>>, response: Response<List<ScheduleResponseDto>>) {
-                    if (response.isSuccessful) {
-                        Toast.makeText(context, "Recurring schedules created", Toast.LENGTH_SHORT).show()
-                        findNavController().navigateUp()
-                    } else {
-                        val errorBody = response.errorBody()?.string() ?: "Unknown error"
-                        Log.e("CreateSchedule", "Error: $errorBody")
-                        Toast.makeText(context, "Failed: ${response.code()} - $errorBody", Toast.LENGTH_LONG).show()
-                    }
-                }
-
-                override fun onFailure(call: Call<List<ScheduleResponseDto>>, t: Throwable) {
-                    Toast.makeText(context, "Error: ${t.message}", Toast.LENGTH_SHORT).show()
-                }
-            })
+            scheduleViewModel.createRecurringSchedule(request)
         }
     }
 
