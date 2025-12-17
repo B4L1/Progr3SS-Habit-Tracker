@@ -148,6 +148,11 @@ class ScheduleDetailsFragment : Fragment() {
             val bundle = Bundle().apply { putInt("schedule_id", scheduleId) }
             findNavController().navigate(R.id.action_scheduleDetailsFragment_to_editScheduleFragment, bundle)
         }
+
+        binding.notesContent.setOnClickListener {
+            val bundle = Bundle().apply { putInt("schedule_id", scheduleId) }
+            findNavController().navigate(R.id.action_scheduleDetailsFragment_to_editScheduleFragment, bundle)
+        }
     }
 
     private fun showOptionsMenu(view: View) {
@@ -197,20 +202,35 @@ class ScheduleDetailsFragment : Fragment() {
         binding.habitNameTextView.text = schedule.habit?.name ?: "Custom Activity"
         
         // Load Icon
+        // Load Icon
         val context = requireContext()
         val iconManager = com.example.lab4.data.local.IconManager(context)
+        
+        var iconName: String? = null
         schedule.habit?.let { habit ->
-            val iconName = iconManager.getIconForHabit(habit.id)
-            if (iconName != null) {
-                val resId = context.resources.getIdentifier(iconName, "drawable", context.packageName)
-                if (resId != 0) {
-                    val drawable = androidx.core.content.ContextCompat.getDrawable(context, resId)
-                    // Set as compound drawable (Left of text)
-                    binding.habitNameTextView.setCompoundDrawablesWithIntrinsicBounds(drawable, null, null, null)
-                    binding.habitNameTextView.compoundDrawablePadding = 16 // 16dp padding
-                }
+            iconName = iconManager.getIconForHabit(habit.id)
+            if (iconName == null) {
+                // Fallback: description parsing (same as ScheduleAdapter)
+                val description = habit.description ?: ""
+                val iconRegex = "\\|icon:([a-zA-Z0-9_]+)\\|".toRegex()
+                val matchResult = iconRegex.find(description)
+                iconName = matchResult?.groupValues?.get(1) ?: habit.icon
             }
         }
+        
+        // Final fallback
+        if (iconName == null) iconName = schedule.icon ?: "ic_activity_generic"
+        
+        val resId = context.resources.getIdentifier(iconName, "drawable", context.packageName)
+        if (resId != 0) {
+            binding.habitIcon.setImageResource(resId)
+        } else {
+            binding.habitIcon.setImageResource(R.drawable.ic_activity_generic)
+        }
+        
+        // Remove compound drawable from text view since we use the dedicated image view
+        binding.habitNameTextView.setCompoundDrawablesWithIntrinsicBounds(null, null, null, null)
+        binding.habitNameTextView.compoundDrawablePadding = 0
         
         // Format Time Range
         val timeRange = formatTimeRange(schedule.start_time, schedule.duration_minutes ?: 30)
@@ -261,28 +281,40 @@ class ScheduleDetailsFragment : Fragment() {
             binding.statusLabelSmall.setTextColor(requireContext().getColor(android.R.color.darker_gray))
         }
 
-        // Goal parsing - duration_minutes is stored in minutes, 
-        // but for display we want to respect the habit's original unit/goal if possible.
-        // The backend stores 'goal' string e.g. "2 Times" or "30 Minutes"
-        // And 'duration_minutes' as the calculated time.
+        // Goal parsing
+        // We prioritize the schedule's own duration as the goal for this specific instance
+        val amount = schedule.duration_minutes ?: 0
+        var unit = "Minutes"
+        var shortUnit = "m"
         
-        val habitGoal = schedule.habit?.goal ?: "${schedule.duration_minutes} Minutes"
-        val parts = habitGoal.split(" ")
-        val amount = parts.getOrNull(0)?.toIntOrNull() ?: schedule.duration_minutes ?: 0
-        val unit = parts.getOrNull(1) ?: "Minutes"
-        
-        // Compact unit for progress text e.g. "2m" or "2x"
-        val shortUnit = when(unit.lowercase()) {
-             "minutes", "minute" -> "m"
-             "hours", "hour" -> "h"
-             "times", "time" -> "x"
-             "pages", "page" -> "p"
-             "steps", "step" -> "st"
-             else -> unit.take(1)
-         }
+        val habitGoal = schedule.habit?.goal
+        if (habitGoal != null) {
+            val parts = habitGoal.split(" ")
+            if (parts.size > 1) {
+                val rawUnit = parts[1] // e.g. "Pages", "Hours"
+                
+                // Check if it's a time unit
+                val lowerUnit = rawUnit.lowercase()
+                if (lowerUnit.contains("hour") || lowerUnit.contains("minute")) {
+                    // Force Minutes for time-based goals (User request: "except the Hours one, where you can add minutes")
+                    unit = "Minutes"
+                    shortUnit = "m"
+                } else {
+                    // Use the custom unit (Pages, Times, Steps, etc.)
+                    unit = rawUnit
+                    // Generate a short unit if possible, or just use first letter/custom logic
+                    shortUnit = when(lowerUnit) {
+                        "times", "time" -> "x"
+                        "pages", "page" -> "p"
+                        "steps", "step" -> "st"
+                        else -> rawUnit.take(1)
+                    }
+                }
+            }
+        }
         
         // Update labels
-        binding.valDuration.text = "$amount$shortUnit" // was Duration, now Goal
+        binding.valDuration.text = "$amount $unit" 
         binding.progressText.text = "$totalLogged / $amount$shortUnit"
         
         // Repeat

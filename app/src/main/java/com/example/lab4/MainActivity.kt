@@ -43,12 +43,34 @@ class MainActivity : AppCompatActivity() {
         setupActionBarWithNavController(navController, appBarConfiguration)
         */
 
-        binding.bottomNav.setupWithNavController(navController)
+        // Helper to setup navigation with custom behavior for Home
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            when (item.itemId) {
+                R.id.homeFragment -> {
+                    // Navigate to home logic
+                    // Pop everything up to home (exclusive) so we return to the home fragment instance
+                    navController.popBackStack(R.id.homeFragment, false)
+                    true
+                }
+                else -> {
+                    // Let the default NavigationUI handle other items
+                    androidx.navigation.ui.NavigationUI.onNavDestinationSelected(item, navController)
+                }
+            }
+        }
+        
+        // Reselect listener to refresh (optional, but good UX)
+        binding.bottomNav.setOnItemReselectedListener { item ->
+            if (item.itemId == R.id.homeFragment) {
+                // If already on home, maybe scroll to today? 
+                // For now, simple re-navigate effectively resets
+            }
+        }
 
         // Hide bottom navigation for login and register screens
         navController.addOnDestinationChangedListener { _, destination, _ ->
             when (destination.id) {
-                R.id.loginFragment, R.id.registerFragment -> {
+                R.id.loginFragment, R.id.registerFragment, R.id.resetPasswordFragment -> {
                     binding.bottomNav.visibility = View.GONE
                 }
                 else -> {

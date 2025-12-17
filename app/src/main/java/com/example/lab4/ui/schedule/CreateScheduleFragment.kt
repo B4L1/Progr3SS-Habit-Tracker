@@ -214,12 +214,16 @@ class CreateScheduleFragment : Fragment() {
     
     private fun showCustomDayPicker() {
         val dayNames = arrayOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
-        val checkedItems = BooleanArray(7) { index -> customDays.contains(index + 1) }
+        // Mapping: Mon=1, Tue=2, ... Sat=6, Sun=0
+        val checkedItems = BooleanArray(7) { index -> 
+            val dayValue = if (index == 6) 0 else index + 1
+            customDays.contains(dayValue) 
+        }
         
         AlertDialog.Builder(requireContext())
             .setTitle("Select Days")
             .setMultiChoiceItems(dayNames, checkedItems) { _, which, isChecked ->
-                val dayValue = which + 1 // 1=Monday...7=Sunday
+                val dayValue = if (which == 6) 0 else which + 1 // Mon(0)->1 ... Sun(6)->0
                 if (isChecked) {
                     if (!customDays.contains(dayValue)) {
                         customDays.add(dayValue)
@@ -229,14 +233,20 @@ class CreateScheduleFragment : Fragment() {
                 }
             }
             .setPositiveButton("OK") { dialog, _ ->
-                customDays.sort()
                 if (customDays.isEmpty()) {
                     Toast.makeText(context, "No days selected, using daily", Toast.LENGTH_SHORT).show()
-                    customDays.addAll(listOf(1, 2, 3, 4, 5, 6, 7))
+                    // Switch to Daily
+                    selectedRepeatMode = "daily"
+                    val buttons = listOf(binding.btnEveryDay, binding.btnWeekdays, binding.btnWeekends, binding.btnCustom)
+                    updateRepeatSelection(binding.btnEveryDay, buttons)
                 }
+                customDays.sort()
                 dialog.dismiss()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ -> 
+                 // If cancelled, maybe revert to daily if empty? Or just leave as is. 
+                 // User didn't specify behavior for cancel, assuming keep previous state.
+            }
             .show()
     }
 
@@ -303,7 +313,8 @@ class CreateScheduleFragment : Fragment() {
         val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val dateString = dateFormat.format(calendar.time)
 
-        if (selectedRepeatMode == "custom" || selectedRepeatMode == "none") {
+        // Only "none" (if we ever support it) is custom (single)
+        if (selectedRepeatMode == "none") {
             val request = CreateCustomScheduleDto(
                 habitId = selectedHabit!!.id,
                 date = dateString,
@@ -314,13 +325,13 @@ class CreateScheduleFragment : Fragment() {
             
             scheduleViewModel.createCustomSchedule(request)
         } else {
-            // Map repeat mode to daysOfWeek
+            // Map repeat mode to daysOfWeek (0=Sun, 1=Mon ... 6=Sat)
             val daysOfWeek = when (selectedRepeatMode) {
-                "daily" -> listOf(1, 2, 3, 4, 5, 6, 7)
+                "daily" -> listOf(0, 1, 2, 3, 4, 5, 6)
                 "weekdays" -> listOf(1, 2, 3, 4, 5)
-                "weekends" -> listOf(6, 7)
-                "custom" -> if (customDays.isNotEmpty()) customDays.toList() else listOf(1, 2, 3, 4, 5, 6, 7)
-                else -> listOf(1, 2, 3, 4, 5, 6, 7)
+                "weekends" -> listOf(6, 0)
+                "custom" -> if (customDays.isNotEmpty()) customDays.toList() else listOf(0, 1, 2, 3, 4, 5, 6)
+                else -> listOf(0, 1, 2, 3, 4, 5, 6)
             }
             
             Log.d("CreateSchedule", "Creating recurring: daysOfWeek=$daysOfWeek, start_time=$startTimeIso, habitId=${selectedHabit!!.id}")

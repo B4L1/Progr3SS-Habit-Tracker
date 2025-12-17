@@ -51,15 +51,15 @@ class ScheduleAdapter(
 
         val newItems = mutableListOf<ListItem>()
         if (morning.isNotEmpty()) {
-            newItems.add(ListItem.Header("Morning", R.drawable.ic_status_pending)) 
+            newItems.add(ListItem.Header("Morning", R.drawable.ic_activity_wakeup)) 
             newItems.addAll(morning.map { ListItem.Item(it) })
         }
         if (afternoon.isNotEmpty()) {
-            newItems.add(ListItem.Header("Afternoon", R.drawable.ic_status_pending)) 
+            newItems.add(ListItem.Header("Afternoon", R.drawable.ic_activity_coffee)) 
             newItems.addAll(afternoon.map { ListItem.Item(it) })
         }
         if (night.isNotEmpty()) {
-            newItems.add(ListItem.Header("Night", R.drawable.ic_status_pending)) 
+            newItems.add(ListItem.Header("Night", R.drawable.ic_activity_sleep)) 
             newItems.addAll(night.map { ListItem.Item(it) })
         }
         items = newItems

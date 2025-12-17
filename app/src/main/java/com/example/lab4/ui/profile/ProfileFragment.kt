@@ -29,6 +29,10 @@ import com.example.lab4.ui.schedule.HabitViewModel
 import com.example.lab4.ui.schedule.HabitViewModelFactory
 import kotlinx.coroutines.launch
 import androidx.recyclerview.widget.RecyclerView
+import com.example.lab4.data.model.ScheduleResponseDto
+import com.example.lab4.data.repository.ScheduleRepository
+import com.example.lab4.ui.schedule.ScheduleViewModel
+import com.example.lab4.ui.schedule.ScheduleViewModelFactory
 
 class ProfileFragment : Fragment() {
     private var _binding: FragmentProfileBinding? = null
@@ -53,6 +57,18 @@ class ProfileFragment : Fragment() {
         )
     }
 
+    private val scheduleViewModel: ScheduleViewModel by viewModels {
+        ScheduleViewModelFactory(
+            ScheduleRepository(
+                RetrofitClient.createService(com.example.lab4.data.remote.ScheduleService::class.java)
+            )
+        )
+    }
+
+    // Cache of today's schedules to update adapter
+    private var todaySchedules: List<com.example.lab4.data.model.ScheduleResponseDto> = emptyList()
+    private var currentHabits: List<HabitResponseDto> = emptyList()
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
@@ -67,8 +83,8 @@ class ProfileFragment : Fragment() {
 
         setupButtons()
         observeViewModels()
-        fetchProfile()
-
+        fetchData()
+        
         childFragmentManager.setFragmentResultListener("requestKey_habitCreated", viewLifecycleOwner) { _, bundle ->
             if (bundle.getBoolean("created")) {
                 if (userId != -1) {
@@ -78,6 +94,20 @@ class ProfileFragment : Fragment() {
         }
     }
     
+    private fun fetchData() {
+        profileViewModel.fetchProfile()
+        
+        // Fetch today's schedules for progress calculation
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val todayDate = dateFormat.format(java.util.Date())
+        scheduleViewModel.fetchSchedules(todayDate)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        fetchData()
+    }
+
     private fun observeViewModels() {
         viewLifecycleOwner.lifecycleScope.launch {
             profileViewModel.profileState.collect { state ->
@@ -97,20 +127,35 @@ class ProfileFragment : Fragment() {
             habitViewModel.habitsState.collect { state ->
                 when (state) {
                     is UiState.Success -> {
-                        setupHabitsRecyclerView(state.data)
+                        currentHabits = state.data
+                        updateHabitsList()
                     }
                     else -> {}
                 }
             }
         }
-    }
-    
-    override fun onResume() {
-        super.onResume()
-        // Refresh profile to show updated image/username
-        fetchProfile()
+        
+        viewLifecycleOwner.lifecycleScope.launch {
+            scheduleViewModel.schedulesState.collect { state ->
+                 when (state) {
+                    is UiState.Success -> {
+                        todaySchedules = state.data
+                        updateHabitsList()
+                    }
+                    else -> {}
+                 }
+            }
+        }
     }
 
+    private fun updateHabitsList() {
+        if (_binding == null) return
+        if (currentHabits.isEmpty()) return 
+        
+        setupHabitsRecyclerView(currentHabits, todaySchedules)
+    }
+
+    // ... (rest of setupButtons, performLogout, etc - unchanged)
     private fun setupButtons() {
         binding.logoutButton.setOnClickListener {
             performLogout()
@@ -137,8 +182,11 @@ class ProfileFragment : Fragment() {
     private fun fetchProfile() {
         profileViewModel.fetchProfile()
     }
-
     
+    private fun fetchHabits(userId: Int) {
+        habitViewModel.fetchHabits()
+    }
+
     private fun updateProfileUI(profile: ProfileResponseDto) {
         // Guard against view being destroyed
         if (_binding == null) return
@@ -184,20 +232,18 @@ class ProfileFragment : Fragment() {
         fetchHabits(profile.id)
     }
 
-    private fun fetchHabits(userId: Int) {
-        habitViewModel.fetchHabits()
-    }
-
-    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>) {
-        // Guard against view being destroyed  
+    private fun setupHabitsRecyclerView(habits: List<HabitResponseDto>, schedules: List<com.example.lab4.data.model.ScheduleResponseDto>) {
         if (_binding == null) return
         
-        val adapter = HabitAdapter(habits)
+        val adapter = HabitAdapter(habits, schedules)
         binding.habitsRecyclerView.layoutManager = LinearLayoutManager(context)
         binding.habitsRecyclerView.adapter = adapter
     }
 
-    class HabitAdapter(private val habits: List<HabitResponseDto>) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
+    class HabitAdapter(
+        private val habits: List<HabitResponseDto>, 
+        private val schedules: List<com.example.lab4.data.model.ScheduleResponseDto>
+    ) : RecyclerView.Adapter<HabitAdapter.HabitViewHolder>() {
         class HabitViewHolder(val binding: ItemHabitBinding) : RecyclerView.ViewHolder(binding.root)
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): HabitViewHolder {
@@ -209,6 +255,34 @@ class ProfileFragment : Fragment() {
             val habit = habits[position]
             holder.binding.habitName.text = habit.name
             holder.binding.habitGoal.text = habit.goal
+            
+            // Calculate progress for today
+            val habitSchedules = schedules.filter { it.habit?.id == habit.id }
+            
+            if (habitSchedules.isNotEmpty()) {
+                val totalLogged = habitSchedules.sumOf { s -> s.progress?.sumOf { it.logged_time ?: 0 } ?: 0 }
+                val totalGoal = habitSchedules.sumOf { it.duration_minutes ?: 0 }
+                
+                holder.binding.habitProgressBar.max = totalGoal.coerceAtLeast(1)
+                holder.binding.habitProgressBar.progress = totalLogged
+
+                // Color logic
+                val context = holder.itemView.context
+                val purple = context.getColor(R.color.purple_200)
+                val green = context.getColor(R.color.green_completed)
+                
+                if (totalLogged >= totalGoal && totalGoal > 0) {
+                     holder.binding.habitProgressBar.setIndicatorColor(green)
+                } else {
+                     holder.binding.habitProgressBar.setIndicatorColor(purple)
+                }
+                holder.binding.habitProgressBar.alpha = 1.0f
+            } else {
+                // Not used today
+                holder.binding.habitProgressBar.progress = 0
+                holder.binding.habitProgressBar.alpha = 0.3f // Dim it
+                 holder.binding.habitProgressBar.setIndicatorColor(holder.itemView.context.getColor(android.R.color.darker_gray))
+            }
         }
 
         override fun getItemCount() = habits.size

@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity
 import com.example.lab4.data.local.TokenManager
 import com.example.lab4.data.remote.RetrofitClient
 import com.example.lab4.databinding.ActivitySplashBinding
+import kotlinx.coroutines.launch
 
 class SplashActivity : AppCompatActivity() {
     private val TAG = "SplashActivity"
@@ -103,5 +104,31 @@ class SplashActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         Log.d(TAG, "onStart: SplashActivity started.")
+        checkIconsInBackground()
+    }
+    
+    private fun checkIconsInBackground() {
+        // user requested to load icons on splash screen for those that don't have them
+        // We run this in a global scope or separate scope so it continues even if Splash finishes.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                // Check if we have token first
+                val tm = com.example.lab4.data.local.TokenManager(applicationContext)
+                if (tm.getAccessToken() != null) {
+                    val habitService = com.example.lab4.data.remote.RetrofitClient.createService(com.example.lab4.data.remote.HabitService::class.java)
+                    val habitRepository = com.example.lab4.data.repository.HabitRepository(habitService)
+                    
+                    val result = habitRepository.getHabits()
+                    result.onSuccess { habits ->
+                        val iconManager = com.example.lab4.data.local.IconManager(applicationContext)
+                        iconManager.checkAndFetchIcons(habits)
+                    }.onFailure {
+                        Log.e(TAG, "Failed to fetch habits for icon check: ${it.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error in background icon check", e)
+            }
+        }
     }
 }

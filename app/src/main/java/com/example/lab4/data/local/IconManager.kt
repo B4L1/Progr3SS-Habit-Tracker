@@ -50,7 +50,6 @@ class IconManager(private val context: Context) {
                                 if (stashedIcon.isNotEmpty()) {
                                     withContext(Dispatchers.Main) {
                                         saveIconForHabit(habit.id, stashedIcon)
-                                        android.util.Log.d("IconManager", "Restored stashed icon $stashedIcon for ${habit.name}")
                                     }
                                 }
                             }
@@ -61,52 +60,77 @@ class IconManager(private val context: Context) {
                 }
             }
 
+            // Identify habits that still need icons (missing or generic)
             val habitsWithoutIcons = habits.filter { habit ->
                 val currentIcon = getIconForHabit(habit.id)
-                // We need an icon if it's missing OR if it's the generic default
+                // Re-analyze if it's null OR generic (assuming user wants specific icons)
+                // But user said: "the others should not be sent... if they have an icon that's not the default one"
+                // So if it IS default (generic), we DO send it.
                 val needsIcon = currentIcon == null || currentIcon == "ic_activity_generic"
-                
-                if (!needsIcon) return@filter false
-                
-                // Note: The restoration loop above puts stashed icons into SharedPreferences.
-                // So 'currentIcon' reflects the stash.
-                // If the stash was generic, we still want to try AI again.
-                
-                true
+                needsIcon
             }
+            
             android.util.Log.d("IconManager", "Found ${habitsWithoutIcons.size} habits needing icons")
-
 
             if (habitsWithoutIcons.isEmpty()) return@withContext
 
+            // BATCH REQUEST
             val geminiService = RetrofitClient.createGeminiService()
             val availableIcons = getAvailableIcons().joinToString(", ")
-
-            for (habit in habitsWithoutIcons) {
-                try {
-                    val prompt = "Pick the best icon for activity '${habit.name}' (${habit.description ?: ""}) from: $availableIcons. Return ONLY the icon name."
-                    android.util.Log.d("IconManager", "Sending prompt to Gemini: $prompt")
+            
+            // Construct Batch Prompt
+            val activityList = habitsWithoutIcons.joinToString("; ") { "ID ${it.id}: '${it.name}' (${it.description ?: ""})" }
+            val prompt = """
+                I have a list of activities. For EACH activity, verify if it matches one of the following icons exactly:
+                [$availableIcons]
+                
+                Using the ID provided, return a JSON array mapping IDs to the best matching icon name. 
+                Format: [{"id": 123, "icon": "ic_activity_example"}, ...]
+                If no good match found for an activity, use "ic_activity_generic".
+                
+                Activities:
+                $activityList
+                
+                Return ONLY the JSON.
+            """.trimIndent()
+            
+            try {
+                android.util.Log.d("IconManager", "Sending BATCH prompt to Gemini...")
+                val request = GeminiRequest(listOf(Content(parts = listOf(Part(prompt)))))
+                val response = geminiService.getIconSuggestion(request)
+                var responseText = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim() ?: ""
+                
+                android.util.Log.d("IconManager", "Gemini Batch Response: $responseText")
+                
+                // Sanitization (sometimes Gemini adds ```json ... ```)
+                if (responseText.startsWith("```")) {
+                    responseText = responseText.replace("```json", "").replace("```", "").trim()
+                }
+                
+                // Parse JSON (Simple manual parsing to avoid adding Gson/Moshi dependency if not ready, strictly speaking we should use a library but regex is safer for simple task)
+                // or just use manual string parsing since the format is strict.
+                // Regex for: {"id": (\d+), "icon": "([^"]+)"}
+                val regex = Regex("""\"id\"\s*:\s*(\d+),\s*\"icon\"\s*:\s*\"([^\"]+)\"""")
+                val matches = regex.findAll(responseText)
+                
+                var count = 0
+                matches.forEach { match ->
+                    val habitId = match.groupValues[1].toIntOrNull()
+                    val iconName = match.groupValues[2]
                     
-                    val request = GeminiRequest(listOf(Content(parts = listOf(Part(prompt)))))
-                    val response = geminiService.getIconSuggestion(request)
-                    val iconName = response.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text?.trim()
-                    
-                    android.util.Log.d("IconManager", "Gemini response: $iconName")
-
-                    withContext(Dispatchers.Main) {
-                        if (iconName != null && iconName.startsWith("ic_")) {
-                             android.widget.Toast.makeText(context, "AI Analysis: Suggested $iconName for ${habit.name}", android.widget.Toast.LENGTH_LONG).show()
-                             saveIconForHabit(habit.id, iconName)
-                        } else {
-                             android.widget.Toast.makeText(context, "AI Analysis: Could not match icon for ${habit.name} (Got: $iconName)", android.widget.Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                } catch (e: Exception) {
-                    android.util.Log.e("IconManager", "Error calling Gemini", e)
-                    withContext(Dispatchers.Main) {
-                        android.widget.Toast.makeText(context, "AI Analysis Error: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                    if (habitId != null && iconName.startsWith("ic_")) {
+                         withContext(Dispatchers.Main) {
+                             saveIconForHabit(habitId, iconName)
+                         }
+                         count++
                     }
                 }
+                 withContext(Dispatchers.Main) {
+                      android.widget.Toast.makeText(context, "AI Batch Analysis: Updated $count icons", android.widget.Toast.LENGTH_SHORT).show()
+                 }
+                
+            } catch (e: Exception) {
+                android.util.Log.e("IconManager", "Error calling Gemini Batch", e)
             }
         }
     }
